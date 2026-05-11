@@ -165,6 +165,35 @@ const toSQLDate = (dateStr) => {
     }
 };
 
+        // --- Get Active Enrollment Period ---
+    app.get('/api/active-period', (req, res) => {
+        // Option A: Hardcoded default (Quick fix)
+        const currentYear = new Date().getFullYear();
+        const activePeriod = {
+            academic_year: `${currentYear}-${currentYear + 1}`,
+            semester: '1st'
+        };
+
+        // Option B: Query from a settings table (If you decide to create one later)
+        // db.query("SELECT * FROM settings WHERE key = 'active_period'", (err, results) => { ... });
+
+        res.json(activePeriod);
+    });
+
+    // --- Admin: Update Enrollment Period ---
+    app.post('/api/admin/active-period', (req, res) => {
+        const { academic_year, semester } = req.body;
+        const sql = `
+            INSERT INTO system_settings (setting_key, setting_value) 
+            VALUES ('active_academic_year', ?), ('active_semester', ?)
+            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
+        `;
+        db.query(sql, [academic_year, semester], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ message: 'Enrollment period updated successfully!' });
+        });
+    });
+
 // --- REGISTER ROUTE ---
 app.post('/api/register', async (req, res) => {
     const data = req.body;
@@ -306,6 +335,42 @@ app.get('/api/admin/verify-details/:id', (req, res) => {
                 });
             });
         });
+    });
+});
+
+// --- Add these endpoints to server.js ---
+
+    app.get('/api/system-settings', (req, res) => {
+        // This query assumes you have a table 'system_settings' 
+        // or are storing these in a settings table with id 1
+        const sql = "SELECT academic_year, semester FROM system_settings WHERE id = 1";
+        
+        db.query(sql, (err, results) => {
+            if (err) {
+                console.error("❌ Error fetching settings:", err.message);
+                return res.status(500).json({ error: "Could not fetch settings" });
+            }
+            if (results.length > 0) {
+                res.json(results[0]);
+            } else {
+                res.status(404).json({ error: "Settings not found" });
+            }
+        });
+    });
+
+// 2. Admin: Update system settings
+app.post('/api/admin/update-settings', (req, res) => {
+    const { academic_year, semester, status } = req.body;
+    
+    // Ensure the table name matches what you use in the query
+    const sql = "UPDATE system_settings SET academic_year = ?, semester = ?, enrollment_status = ? WHERE id = 1";
+    
+    db.query(sql, [academic_year, semester, status], (err, result) => {
+        if (err) {
+            console.error("❌ SQL Error in update-settings:", err.message);
+            return res.status(500).json({ success: false, error: err.message });
+        }
+        res.json({ success: true, message: "Settings updated successfully!" });
     });
 });
 

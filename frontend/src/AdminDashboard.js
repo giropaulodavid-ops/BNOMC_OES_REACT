@@ -6,24 +6,33 @@ const AdminDashboard = () => {
     const [stats, setStats] = useState({ total: 0, enrollees: 0, pending: 0 });
     const [students, setStudents] = useState([]);
     const [activities, setActivities] = useState([]);
+    // State initialized with empty strings
+    const [settings, setSettings] = useState({ academic_year: '', semester: '', status: 'Open' });
 
     useEffect(() => {
         const fetchData = async () => {
             try {
-                // Fetch Students List
                 const resStudents = await fetch('http://localhost:5000/api/admin/students');
                 const dataStudents = await resStudents.json();
                 setStudents(Array.isArray(dataStudents) ? dataStudents : []);
 
-                // Fetch Stats
                 const resStats = await fetch('http://localhost:5000/api/admin/stats');
                 const dataStats = await resStats.json();
                 setStats(dataStats);
 
-                // Fetch Recent Activity (Limited to 10 by the backend)
                 const resActivities = await fetch('http://localhost:5000/api/admin/activities');
                 const dataActivities = await resActivities.json();
                 setActivities(Array.isArray(dataActivities) ? dataActivities : []);
+
+                const resSettings = await fetch('http://localhost:5000/api/system-settings');
+                const dataSettings = await resSettings.json();
+                
+                // FIX: Added fallbacks (|| '') to ensure state never becomes undefined
+                setSettings({
+                    academic_year: dataSettings.current_academic_year || '',
+                    semester: dataSettings.current_semester || '',
+                    status: dataSettings.enrollment_status || 'Open'
+                });
                 
             } catch (err) {
                 console.error("Failed to fetch dashboard data:", err);
@@ -37,6 +46,34 @@ const AdminDashboard = () => {
         navigate('/admin/login');
     };
 
+    const handleUpdateSettings = async () => {
+        const res = await fetch('http://localhost:5000/api/admin/update-settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+        if(res.ok) {
+            alert(`System updated to ${settings.semester}, AY ${settings.academic_year}`);
+        } else {
+            alert("Failed to update settings.");
+        }
+    };
+
+    const handleSaveSettings = async () => {
+        try {
+            const response = await fetch('http://localhost:5000/api/admin/update-settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(settings), // Ensure 'settings' has AY, Semester, and Status
+            });
+            const data = await response.json();
+            if (data.success) alert("Saved!");
+            else console.error(data.error);
+        } catch (err) {
+            console.error("Network Error:", err);
+        }
+    };
+
     return (
         <div style={{
             fontFamily: "'Montserrat', sans-serif",
@@ -48,7 +85,6 @@ const AdminDashboard = () => {
             minHeight: "100vh",
             color: "#333"
         }}>
-            {/* Header */}
             <header style={{
                 backgroundColor: "#0a4d92",
                 color: "white",
@@ -76,10 +112,65 @@ const AdminDashboard = () => {
             </header>
 
             <div style={{ display: "flex", padding: "40px", gap: "30px", maxWidth: "1600px", margin: "0 auto" }}>
-                
-                {/* Main Content Area */}
                 <div style={{ flex: 1 }}>
-                    {/* Stats Grid */}
+                    <div style={{ background: "rgba(255, 255, 255, 0.95)", padding: "25px", borderRadius: "15px", marginBottom: "30px", boxShadow: "0 8px 20px rgba(0,0,0,0.1)", borderLeft: "8px solid #0a4d92" }}>
+                        <h3 style={{ margin: "0 0 15px 0", fontSize: "1rem", fontWeight: 800, color: "#0a4d92", textTransform: "uppercase" }}>Active Enrollment Term</h3>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "25px", alignItems: "flex-end" }}>
+                            
+                            <div>
+                                <label style={{ display: "block", fontSize: "0.7rem", fontWeight: 800, marginBottom: "5px", color: "#666" }}>ACADEMIC YEAR</label>
+                                <input 
+                                    type="text" 
+                                    placeholder="e.g. 2024-2025"
+                                    // FIX: Added "|| ''" as a secondary safeguard
+                                    value={settings.academic_year || ''} 
+                                    onChange={e => setSettings({...settings, academic_year: e.target.value})} 
+                                    style={{ padding: "10px 15px", borderRadius: "8px", border: "2px solid #ddd", fontWeight: 700, width: "150px" }} 
+                                />
+                            </div>
+
+                            <div>
+                                <label style={{ display: "block", fontSize: "0.7rem", fontWeight: 800, marginBottom: "5px", color: "#666" }}>SELECT SEMESTER</label>
+                                <div style={{ display: "flex", gap: "5px", background: "#f0f0f0", padding: "5px", borderRadius: "10px" }}>
+                                    {['1st Semester', '2nd Semester', 'Summer'].map(sem => (
+                                        <button 
+                                            key={sem}
+                                            onClick={() => setSettings({...settings, semester: sem})}
+                                            style={{
+                                                padding: "8px 15px",
+                                                border: "none",
+                                                borderRadius: "7px",
+                                                cursor: "pointer",
+                                                fontWeight: 800,
+                                                fontSize: "0.75rem",
+                                                backgroundColor: settings.semester === sem ? "#0a4d92" : "transparent",
+                                                color: settings.semester === sem ? "white" : "#666",
+                                                transition: "all 0.2s"
+                                            }}
+                                        >{sem.toUpperCase()}</button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <button 
+                                onClick={handleUpdateSettings}
+                                style={{ 
+                                    background: "#e6e94e", 
+                                    color: "#073b75", 
+                                    padding: "11px 25px", 
+                                    borderRadius: "10px", 
+                                    border: "none", 
+                                    cursor: "pointer", 
+                                    fontWeight: 900,
+                                    fontSize: "0.85rem",
+                                    boxShadow: "0 4px 10px rgba(230, 233, 78, 0.3)"
+                                }}
+                            >
+                                UPDATE SYSTEM
+                            </button>
+                        </div>
+                    </div>
+
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "20px", marginBottom: "40px" }}>
                         <div style={{ background: "#1a5b9d", color: "white", padding: "25px", borderRadius: "15px", textAlign: "center", boxShadow: "0 4px 15px rgba(0,0,0,0.1)" }}>
                             <h2 style={{ fontSize: "3rem", fontWeight: 900, margin: 0 }}>{stats.total || 0}</h2>
@@ -95,7 +186,6 @@ const AdminDashboard = () => {
                         </div>
                     </div>
 
-                    {/* Table Section */}
                     <div style={{ background: "rgba(255, 255, 255, 0.9)", borderRadius: "15px", boxShadow: "0 10px 30px rgba(0,0,0,0.1)", overflow: "hidden" }}>
                         <table style={{ width: "100%", borderCollapse: "collapse" }}>
                             <thead>
@@ -117,7 +207,6 @@ const AdminDashboard = () => {
                                         <td style={{ padding: "15px", textAlign: "center", fontWeight: 600 }}>{student.applied_level || 'N/A'}</td>
                                         <td style={{ padding: "15px", textAlign: "center", fontWeight: 600 }}>{student.applied_date ? new Date(student.applied_date).toLocaleDateString() : 'N/A'}</td>
                                         
-                                        {/* Document Status Column */}
                                         <td style={{ padding: "15px", textAlign: "center" }}>
                                             <span style={{ 
                                                 padding: "5px 12px", borderRadius: "5px", fontSize: "0.75rem", fontWeight: 800,
@@ -127,7 +216,6 @@ const AdminDashboard = () => {
                                             }}>{student.doc_status || 'Pending'}</span>
                                         </td>
 
-                                        {/* Payment Status Column */}
                                         <td style={{ padding: "15px", textAlign: "center" }}>
                                             <span style={{ 
                                                 padding: "5px 12px", borderRadius: "5px", fontSize: "0.75rem", fontWeight: 800,
@@ -150,7 +238,6 @@ const AdminDashboard = () => {
                     </div>
                 </div>
 
-                {/* Sidebar - Recent Activity */}
                 <div style={{ width: "350px", background: "#0a4d92", borderRadius: "15px", padding: "30px", color: "white", boxShadow: "0 10px 30px rgba(0,0,0,0.2)", height: "fit-content" }}>
                     <h3 style={{ fontSize: "1.2rem", fontWeight: 800, textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.1)", paddingBottom: "15px", marginBottom: "20px" }}>Recent Activity</h3>
                     <div style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
