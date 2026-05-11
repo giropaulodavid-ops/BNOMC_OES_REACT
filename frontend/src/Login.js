@@ -40,6 +40,22 @@ const Login = () => {
         }
     };
 
+    const handleForgotPassword = async (e) => {
+        e.preventDefault();
+        const email = prompt("Please enter your registered email address:");
+        
+        if (!email) return;
+
+        try {
+            const res = await axios.post('http://127.0.0.1:5000/api/forgot-password', { 
+                email_address: email 
+            });
+            alert(res.data.message);
+        } catch (err) {
+            alert(err.response?.data?.error || "An error occurred. Please try again.");
+        }
+    };
+
     return (
         <>
             {/* Styles & Montserrat Font Integration */}
@@ -144,7 +160,13 @@ const Login = () => {
                             </div>
 
                             <div className="flex justify-end text-[11px] text-gray-300 font-bold uppercase tracking-widest">
-                                <a href="#" className="hover:text-white underline">Forgot Password?</a>
+                                <button 
+                                    type="button" 
+                                    onClick={handleForgotPassword}
+                                    className="hover:text-white underline bg-transparent border-none cursor-pointer p-0"
+                                >
+                                    Forgot Password?
+                                </button>
                             </div>
 
                             <button 

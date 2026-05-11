@@ -5,6 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcrypt');
+const nodemailer = require('nodemailer');
 
 const app = express();
 app.use(cors());
@@ -20,6 +21,14 @@ const storage = multer.diskStorage({
     }
 });
 const upload = multer({ storage });
+
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: 'giropaulo.david@unc.edu.ph', // Your email
+        pass: 'nhukrcijphmuauul'          // Your 16-character App Password
+    }
+});
 
 app.use('/uploads', express.static('uploads'));
 
@@ -295,6 +304,71 @@ app.post('/api/login', (req, res) => {
         }
     });
 });
+
+    app.post('/api/forgot-password', (req, res) => {
+        const { email_address } = req.body;
+
+        // Check if the student exists in the database
+        db.query("SELECT * FROM students WHERE email_address = ?", [email_address], (err, results) => {
+            if (err) return res.status(500).json({ error: err.message });
+            if (results.length === 0) return res.status(404).json({ error: "Email not found in our records." });
+
+            const student = results[0];
+            
+            // In a real app, you'd send a reset link. 
+            // For now, let's send a simple notification.
+            const mailOptions = {
+                from: 'BNOMC Enrollment System <your-school-email@gmail.com>',
+                to: email_address,
+                subject: 'Password Reset Request',
+                html: `
+                    <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #eee;">
+                        <h2 style="color: #0B4E94;">Password Reset</h2>
+                        <p>Hello <strong>${student.first_name}</strong>,</p>
+                        <p>We received a request to reset your password for the BNOMC Online Enrollment System.</p>
+                        <p>To reset your password, please click the button below:</p>
+                        <a href="http://localhost:3000/reset-password?email=${email_address}" 
+                        style="background: #E8E657; color: #0B4E94; padding: 10px 20px; text-decoration: none; font-weight: bold; border-radius: 5px;">
+                        Reset My Password
+                        </a>
+                        <p style="margin-top: 20px; font-size: 12px; color: #777;">If you did not request this, please ignore this email.</p>
+                    </div>
+                `
+            };
+
+            transporter.sendMail(mailOptions, (error, info) => {
+                if (error) {
+                    console.error("❌ Email Error:", error);
+                    return res.status(500).json({ error: "Failed to send email." });
+                }
+                res.json({ success: true, message: "A reset link has been sent to your email!" });
+            });
+        });
+    });
+
+    app.post('/api/reset-password', async (req, res) => {
+        const { email, newPassword } = req.body;
+
+        try {
+            // 1. Hash the new password
+            const saltRounds = 10;
+            const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+            // 2. Update the student record
+            const sql = "UPDATE students SET password = ? WHERE email_address = ?";
+            db.query(sql, [hashedPassword, email], (err, result) => {
+                if (err) return res.status(500).json({ error: err.message });
+                
+                if (result.affectedRows === 0) {
+                    return res.status(404).json({ error: "User not found." });
+                }
+
+                res.json({ success: true, message: "Password updated successfully!" });
+            });
+        } catch (err) {
+            res.status(500).json({ error: "Server error during hashing." });
+        }
+    });
 
 app.get('/api/admin/verify-details/:id', (req, res) => {
     const studentId = req.params.id;

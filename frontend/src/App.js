@@ -11,6 +11,7 @@ import AdminDashboard from './AdminDashboard';
 import AdminStudentProfile from './AdminStudentProfile';
 import EditProfile from './editProfile';
 import AdminVerify from './AdminVerify';
+import ResetPassword from './ResetPassword';
 
 function App() {
   return (
@@ -29,6 +30,7 @@ function App() {
         <Route path="/admin/student/:id" element={<AdminStudentProfile />} />
         <Route path="/admin/verify/:id" element={<AdminVerify />} />
         <Route path="/" element={<Navigate to="/login" />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
       </Routes>
     </Router>
   );
