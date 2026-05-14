@@ -6,6 +6,7 @@ import DashboardLayout from './DashboardLayout';
 const EnrollTo = () => {
     const navigate = useNavigate();
     const studentId = localStorage.getItem('studentId');
+    const storedName = localStorage.getItem('studentName');
 
     const [formData, setFormData] = useState({
         educational_level: '',
@@ -17,11 +18,11 @@ const EnrollTo = () => {
     });
 
     const [message, setMessage] = useState('');
-    const [isSubmitted, setIsSubmitted] = useState(false);
-    const [hasEnrollmentRecord, setHasEnrollmentRecord] = useState(false);
     const [loading, setLoading] = useState(true);
     const [isEnrolled, setIsEnrolled] = useState(false);
-    const [studentName, setStudentName] = useState('');
+    const [studentName] = useState(storedName || 'Student');
+    const [hasEnrollmentRecord, setHasEnrollmentRecord] = useState(false); // Added missing state
+    const [verificationStatus, setVerificationStatus] = useState('');
 
     const yearLevelOptions = {
         'Kindergarten': ['Kindergarten'],
@@ -36,68 +37,55 @@ const EnrollTo = () => {
         'Elementary School': ['N/A'],
         'Junior High School': ['N/A'],
         'Senior High School': ['ABM', 'STEM', 'HUMSS', 'GAS'],
-        'College': ['BTLED (Bachelor of Technical Livelihood Education Major in Home Economics)', 'BINDTECH (Bachelor of Industrial Technology Major in Culinary Technology)']
+        'College': [
+            'BTLED (Bachelor of Technical Livelihood Education Major in Home Economics)', 
+            'BINDTECH (Bachelor of Industrial Technology Major in Culinary Technology)'
+        ]
     };
 
     useEffect(() => {
-        const fetchData = async () => {
+        const checkStatus = async () => {
             try {
-                // 1. Fetch Admin Settings for Active Period
-                const settingsRes = await axios.get('http://localhost:5000/api/system-settings');
-                const adminYear = settingsRes.data.academic_year;
-                const adminSemester = settingsRes.data.semester;
-
-                // 2. Fetch student basic info
-                const studentRes = await axios.get(`http://localhost:5000/api/student/${studentId}`);
-                const student = studentRes.data;
-                const middleInitial = student.middle_name ? ` ${student.middle_name[0]}.` : '';
-                setStudentName(`${student.last_name}, ${student.first_name}${middleInitial}`);
-
-                // 3. Check enrollment verification status
-                let docStatus = 'Pending';
-                let payStatus = 'Pending';
-                try {
-                    const enrollmentStatusRes = await axios.get(`http://localhost:5000/api/student/${studentId}/enrollment-status`);
-                    docStatus = enrollmentStatusRes.data.doc_status || 'Pending';
-                    payStatus = enrollmentStatusRes.data.pay_status || 'Pending';
-                } catch (statusErr) {
-                    console.warn('⚠️ Enrollment status not found yet.');
-                }
+                // 1. Fetch current system settings and enrollment status
+                const res = await axios.get(`http://localhost:5000/api/student/${studentId}/enrollment-status`);
                 
-                const fullyVerified = docStatus === 'Verified' && payStatus === 'Verified';
-                setIsEnrolled(fullyVerified);
-
-                // 4. Fetch existing enrollment data
-                const existingEnrollmentRes = await axios.get(`http://localhost:5000/api/student/${studentId}/enroll-to`);
-                
-                if (existingEnrollmentRes.data && existingEnrollmentRes.data.educational_level) {
+                if (res.data?.isEnrolled) {
+                    const dbData = res.data.enrollmentData;
                     setFormData({
-                        ...existingEnrollmentRes.data,
+                        educational_level: dbData.educational_level || '',
+                        strand: dbData.strand || '',
+                        student_type: dbData.student_type || '',
+                        year_level: dbData.year_level || '',
+                        semester: dbData.semester,
+                        academic_year: dbData.academic_year,
                     });
-                    setIsSubmitted(true);
+                    setIsEnrolled(true);
                     setHasEnrollmentRecord(true);
-                    
-                    if (fullyVerified) {
-                        setMessage('Status: Officially Enrolled for ' + existingEnrollmentRes.data.academic_year);
-                    } else {
-                        setMessage('Status: Enrollment Submitted (Pending Admin Review)');
-                    }
+                    setMessage('You are already enrolled for this term.');
                 } else {
-                    // Pre-fill with Admin settings for new enrollments
+                    // Set defaults from system settings if not enrolled
                     setFormData(prev => ({
                         ...prev,
-                        academic_year: adminYear,
-                        semester: adminSemester
+                        academic_year: res.data?.currentPeriod?.academic_year || '',
+                        semester: res.data?.currentPeriod?.semester || ''
                     }));
                 }
+
+                // 2. Optional: Check verification status if needed specifically from the other endpoint
+                const resCheck = await fetch(`http://localhost:5000/api/student/${studentId}/enrollment-check`);
+                const dataCheck = await resCheck.json();
+                if (dataCheck.enrolled) {
+                    setVerificationStatus(dataCheck.status);
+                }
+
             } catch (err) {
-                console.error("Fetch Error:", err);
+                console.error("Error fetching status:", err);
             } finally {
                 setLoading(false);
             }
         };
 
-        fetchData();
+        if (studentId) checkStatus();
     }, [studentId]);
 
     const handleChange = (e) => {
@@ -116,15 +104,18 @@ const EnrollTo = () => {
         }
     };
 
-    const isReadOnly = hasEnrollmentRecord || isSubmitted;
-
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (isReadOnly) return;
+        if (isEnrolled) return;
+
+        if (!formData.educational_level || !formData.strand || !formData.year_level || !formData.student_type) {
+            alert("Please fill out all fields.");
+            return;
+        }
 
         try {
             await axios.post(`http://localhost:5000/api/student/${studentId}/enroll-to`, formData);
-            setIsSubmitted(true);
+            setIsEnrolled(true);
             setHasEnrollmentRecord(true);
             setMessage('Enrollment selection saved successfully!');
         } catch (err) {
@@ -142,7 +133,7 @@ const EnrollTo = () => {
     }
 
     return (
-        <DashboardLayout activePath="/enroll-to" studentName={studentName} isEnrolled={isEnrolled}>
+        <DashboardLayout activePath="/enroll-to" studentName={studentName} isEnrolled={verificationStatus === 'Verified'}>
             <div style={{ maxWidth: 620, margin: '0 auto' }}>
                 <div style={styles.headerContainer}>
                     <h1 style={styles.headerTitle}>ENROLL TO</h1>
@@ -153,10 +144,12 @@ const EnrollTo = () => {
                     {message && (
                         <div style={{
                             ...styles.messageBanner,
-                            backgroundColor: isEnrolled ? '#d4f0c6' : '#fff3cd',
-                            color: isEnrolled ? '#155724' : '#856404'
+                            backgroundColor: isEnrolled ? '#d4f0c6' : '#f8d7da',
+                            color: isEnrolled ? '#155724' : '#721c24',
+                            border: isEnrolled ? '1px solid #c3e6cb' : '1px solid #f5c6cb'
                         }}>
-                            {isEnrolled ? '✅ ' : '⏳ '}{message}
+                            {isEnrolled ? '✅ ' : '❌ '}{message}
+                            {verificationStatus && <div style={{fontSize: '0.8rem', marginTop: '5px'}}>Status: {verificationStatus}</div>}
                         </div>
                     )}
 
@@ -166,11 +159,11 @@ const EnrollTo = () => {
                             name="educational_level"
                             value={formData.educational_level}
                             onChange={handleChange}
-                            style={isReadOnly ? styles.readonlyInput : styles.input}
+                            style={isEnrolled ? styles.readonlyInput : styles.input}
                             required
-                            disabled={isReadOnly}
+                            disabled={isEnrolled}
                         >
-                            <option value="">Select</option>
+                            <option value="">Select Level</option>
                             <option value="Kindergarten">Kindergarten</option>
                             <option value="Elementary School">Elementary School</option>
                             <option value="Junior High School">Junior High School</option>
@@ -183,11 +176,11 @@ const EnrollTo = () => {
                             name="strand"
                             value={formData.strand}
                             onChange={handleChange}
-                            style={isReadOnly ? styles.readonlyInput : styles.input}
+                            style={(isEnrolled || ['Kindergarten', 'Elementary School', 'Junior High School'].includes(formData.educational_level)) ? styles.readonlyInput : styles.input}
                             required
-                            disabled={isReadOnly || ['Kindergarten', 'Elementary School', 'Junior High School'].includes(formData.educational_level)}
+                            disabled={isEnrolled || ['Kindergarten', 'Elementary School', 'Junior High School'].includes(formData.educational_level)}
                         >
-                            <option value="">Select</option>
+                            <option value="">Select Strand/Course</option>
                             {formData.educational_level && strandOptions[formData.educational_level]?.map(strand => (
                                 <option key={strand} value={strand}>{strand}</option>
                             ))}
@@ -198,11 +191,11 @@ const EnrollTo = () => {
                             name="student_type"
                             value={formData.student_type}
                             onChange={handleChange}
-                            style={isReadOnly ? styles.readonlyInput : styles.input}
+                            style={isEnrolled ? styles.readonlyInput : styles.input}
                             required
-                            disabled={isReadOnly}
+                            disabled={isEnrolled}
                         >
-                            <option value="">Select</option>
+                            <option value="">Select Type</option>
                             <option value="New Enrollee">New Enrollee</option>
                             <option value="Re-Enrollee">Re-Enrollee</option>
                         </select>
@@ -212,21 +205,19 @@ const EnrollTo = () => {
                             name="year_level"
                             value={formData.year_level}
                             onChange={handleChange}
-                            style={isReadOnly ? styles.readonlyInput : styles.input}
+                            style={(isEnrolled || formData.educational_level === 'Kindergarten') ? styles.readonlyInput : styles.input}
                             required
-                            disabled={isReadOnly || formData.educational_level === 'Kindergarten'}
+                            disabled={isEnrolled || formData.educational_level === 'Kindergarten'}
                         >
-                            <option value="">Select</option>
+                            <option value="">Select Year</option>
                             {formData.educational_level && yearLevelOptions[formData.educational_level]?.map(level => (
                                 <option key={level} value={level}>{level}</option>
                             ))}
                         </select>
 
-                        {/* READ ONLY SECTION FOR ADMIN SETTINGS */}
                         <label style={styles.label}>Semester</label>
                         <input
                             type="text"
-                            name="semester"
                             value={formData.semester || 'Loading...'}
                             readOnly
                             style={styles.readonlyInput}
@@ -235,14 +226,13 @@ const EnrollTo = () => {
                         <label style={styles.label}>Academic Year</label>
                         <input
                             type="text"
-                            name="academic_year"
                             value={formData.academic_year || 'Loading...'}
                             readOnly
                             style={styles.readonlyInput}
                         />
 
                         <div style={{ textAlign: 'center', marginTop: 20 }}>
-                            {!isSubmitted ? (
+                            {!isEnrolled ? (
                                 <button type="submit" style={styles.submitButton}>
                                     SUBMIT ENROLLMENT
                                 </button>

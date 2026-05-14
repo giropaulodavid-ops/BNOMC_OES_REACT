@@ -26,15 +26,13 @@ const Register = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        
-        // Generate random 6-digit password
         const generatedPassword = Math.floor(100000 + Math.random() * 900000).toString();
         const submissionData = { ...formData, password: generatedPassword };
 
         try {
             const res = await axios.post('http://127.0.0.1:5000/api/register', submissionData);
             if (res.data.success) {
-                alert("Registration Successful! Your password is: " + generatedPassword);
+                alert(`Registration Successful! A copy of your credentials has been sent to ${formData.email_address}.`);
                 navigate('/login');
             }
         } catch (err) {

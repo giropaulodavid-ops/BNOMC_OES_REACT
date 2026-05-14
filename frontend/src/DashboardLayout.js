@@ -12,9 +12,9 @@ const DashboardLayout = ({ children, activePath, studentName }) => {
       if (!studentId) return;
       
       try {
-        // Calling the specific status endpoint we created in server.js
-        const response = await axios.get(`http://127.0.0.1:5000/api/student/${studentId}/enrollment-status`);
-        setIsEnrolled(response.data.isEnrolled);
+        const response = await axios.get(`http://127.0.0.1:5000/api/student/${studentId}/enrollment-check`);
+        // Only show ENROLLED if admin has verified the documents
+        setIsEnrolled(response.data.enrolled && response.data.status === 'Verified');
       } catch (error) {
         console.error('Error fetching enrollment status:', error);
       }
