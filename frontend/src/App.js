@@ -3,7 +3,6 @@ import Login from './Login';
 import Register from './Register';
 import StudentDashboard from './studentDashboard';
 import EnrollTo from './EnrollTo';
-import Enrollment from './Enrollment';
 import Documents from './Documents';
 import Payment from './Payment';
 import AdminLogin from './AdminLogin';
@@ -22,7 +21,6 @@ function App() {
         <Route path="/student-dashboard" element={<StudentDashboard />} />
         <Route path="/edit-profile" element={<EditProfile />} />
         <Route path="/enroll-to" element={<EnrollTo />} />
-        <Route path="/enrollment" element={<Enrollment />} />
         <Route path="/documents" element={<Documents />} />
         <Route path="/payment" element={<Payment />} />
         <Route path="/admin/login" element={<AdminLogin />} />
