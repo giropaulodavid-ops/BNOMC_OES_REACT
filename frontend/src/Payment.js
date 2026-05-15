@@ -36,11 +36,7 @@ const OnsiteSteps = ({ studentId, formattedName, onBack }) => (
       </p>
     </div>
 
-    <button style={styles.backBtn} onClick={onBack}
-      onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f0f741'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-      onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#e6e94e'; e.currentTarget.style.transform = 'translateY(0)'; }}>
-      DONE
-    </button>
+    <button style={styles.backBtn} onClick={onBack}>DONE</button>
   </div>
 );
 
@@ -50,44 +46,58 @@ const OnlinePayment = ({ studentId, formattedName, onBack }) => {
   const [refMessage, setRefMessage] = useState('');
   const [refError, setRefError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [isSubmitted, setIsSubmitted] = useState(false); // ADDED: Tracking submission state
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [payStatus, setPayStatus] = useState('Pending');
+  const [currentPeriod, setCurrentPeriod] = useState({ academic_year: '', semester: '' });
 
-  // ADDED: Logic to fetch the reference number from the correct database table
   useEffect(() => {
-    const fetchExistingPayment = async () => {
+    const initializePaymentView = async () => {
       try {
-        const res = await api.get(`/student/${studentId}/payment`);
-        // We check for 'reference_number' which matches your SQL table column
+        // 1. Get current active period
+        const settingsRes = await api.get('/system-settings');
+        const { academic_year, semester } = settingsRes.data;
+        setCurrentPeriod({ academic_year, semester });
+
+        // 2. Fetch payment for this specific student and period
+        const res = await api.get(`/student/${studentId}/payment`, {
+          params: { academic_year, semester }
+        });
+
         if (res.data && res.data.reference_number) {
           setReferenceNumber(res.data.reference_number);
-          setIsSubmitted(true); // Lock the form if data exists
+          setPayStatus(res.data.status);
+          setIsSubmitted(true); // Locks the UI
         }
       } catch (err) {
-        console.error("Error fetching payment info:", err);
+        console.error("Error initializing payment view:", err);
       }
     };
-    if (studentId) fetchExistingPayment();
+    
+    if (studentId) initializePaymentView();
   }, [studentId]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (isSubmitted) return; // Prevent double submission
+    if (isSubmitted) return;
 
     const trimmed = referenceNumber.trim();
     if (!trimmed) {
       setRefError('Please enter a valid reference number.');
-      setRefMessage('');
       return;
     }
+
     setSubmitting(true);
+    setRefError('');
     try {
-      await api.post(`/student/${studentId}/payment`, { reference_number: trimmed });
-      setRefMessage('Reference number submitted successfully! Our admin will verify your payment shortly.');
-      setRefError('');
-      setIsSubmitted(true); // ADDED: Lock the UI immediately after success
+      await api.post(`/student/${studentId}/payment`, { 
+        reference_number: trimmed,
+        academic_year: currentPeriod.academic_year,
+        semester: currentPeriod.semester
+      });
+      setRefMessage('Reference number submitted successfully! Awaiting admin verification.');
+      setIsSubmitted(true);
     } catch {
       setRefError('Submission failed. Please try again.');
-      setRefMessage('');
     } finally {
       setSubmitting(false);
     }
@@ -106,7 +116,22 @@ const OnlinePayment = ({ studentId, formattedName, onBack }) => {
       <div style={styles.applicantInfo}>
         <p>Applicant ID: <span style={styles.infoSpan}>{studentId}</span></p>
         <p>Student Name: <span style={styles.infoSpan}>{formattedName}</span></p>
+        <p>Period: <span style={styles.infoSpan}>{currentPeriod.semester} | A.Y. {currentPeriod.academic_year}</span></p>
       </div>
+
+      {/* Verification Status Banner */}
+      {isSubmitted && (
+        <div style={{
+          ...styles.statusBanner,
+          backgroundColor: payStatus === 'Verified' ? '#d4edda' : '#fff3cd',
+          color: payStatus === 'Verified' ? '#155724' : '#856404',
+          borderColor: payStatus === 'Verified' ? '#c3e6cb' : '#ffeeba'
+        }}>
+          {payStatus === 'Verified' 
+            ? '✅ YOUR PAYMENT HAS BEEN VERIFIED BY THE ADMIN.' 
+            : '⏳ PAYMENT SUBMITTED. AWAITING ADMIN VERIFICATION.'}
+        </div>
+      )}
 
       <p style={{ ...styles.sectionSubheader, marginTop: 24 }}>Online &amp; Bank Payment Steps</p>
 
@@ -130,7 +155,7 @@ const OnlinePayment = ({ studentId, formattedName, onBack }) => {
         <p style={styles.stepDesc}>Save a screenshot or photo of your transaction receipt for verification.</p>
       </div>
 
-      {/* Step 3 — ref form */}
+      {/* Step 3 */}
       <div style={styles.stepItem}>
         <div style={styles.stepTitle}>Step 3:</div>
         <p style={styles.stepDesc}>Enter your <strong>Reference Number</strong> below and click Submit.</p>
@@ -143,22 +168,20 @@ const OnlinePayment = ({ studentId, formattedName, onBack }) => {
                 value={referenceNumber}
                 onChange={e => setReferenceNumber(e.target.value)}
                 placeholder="PAY-A1B2-C3D4-E5F6"
-                readOnly={isSubmitted} // UPDATED: Makes input un-editable
+                readOnly={isSubmitted} 
                 style={{
                    ...styles.refInput,
-                   backgroundColor: isSubmitted ? '#e9ecef' : '#fff', // Gray out when locked
+                   backgroundColor: isSubmitted ? '#e9ecef' : '#fff', 
                    cursor: isSubmitted ? 'not-allowed' : 'text'
                 }}
               />
               <button type="submit" 
-                disabled={submitting || isSubmitted} // UPDATED: Disables button
+                disabled={submitting || isSubmitted} 
                 style={{
                   ...styles.refSubmitBtn,
                   opacity: isSubmitted ? 0.7 : 1,
                   cursor: isSubmitted ? 'not-allowed' : 'pointer'
-                }}
-                onMouseEnter={e => { if(!isSubmitted) { e.currentTarget.style.backgroundColor = '#f0f741'; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
-                onMouseLeave={e => { if(!isSubmitted) { e.currentTarget.style.backgroundColor = '#e6e94e'; e.currentTarget.style.transform = 'translateY(0)'; } }}>
+                }}>
                 {submitting ? '...' : isSubmitted ? 'SUBMITTED' : 'SUBMIT'}
               </button>
             </div>
@@ -179,11 +202,7 @@ const OnlinePayment = ({ studentId, formattedName, onBack }) => {
         <p style={styles.noteText}>Please bring your physical documents to the <strong>Registrar's Office</strong> upon your visit to complete the process.</p>
       </div>
 
-      <button style={{ ...styles.backBtn, marginTop: 30 }} onClick={onBack}
-        onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f0f741'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-        onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#e6e94e'; e.currentTarget.style.transform = 'translateY(0)'; }}>
-        DONE
-      </button>
+      <button style={styles.backBtn} onClick={onBack}>DONE</button>
     </div>
   );
 };
@@ -204,8 +223,7 @@ const Payment = () => {
       try {
         const statusRes = await api.get(`/student/${studentId}/enrollment-status`);
         const docStatus = statusRes.data.doc_status || 'Pending';
-        // Note: Check if backend sends 'payment_status' or 'pay_status'
-        const payStatus = statusRes.data.payment_status || statusRes.data.pay_status || 'Pending';
+        const payStatus = statusRes.data.pay_status || 'Pending';
         setIsEnrolled(docStatus === 'Verified' && payStatus === 'Verified');
       } catch (err) {
         console.error(err);
@@ -219,8 +237,8 @@ const Payment = () => {
 
   if (loading) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#EFF2F7' }}>
-        <div style={{ borderRadius: 24, background: '#fff', padding: '24px 32px', boxShadow: '0 8px 32px rgba(0,0,0,0.12)', textAlign: 'center' }}>
+      <div style={styles.loadingContainer}>
+        <div style={styles.loadingBox}>
           <p style={{ fontWeight: 700, fontSize: '1.1rem', color: '#0a4d92' }}>Loading payment details...</p>
         </div>
       </div>
@@ -229,49 +247,26 @@ const Payment = () => {
 
   return (
     <DashboardLayout activePath="/payment" studentName={studentName} isEnrolled={isEnrolled}>
-      {view === 'select' && (
+      {view === 'select' ? (
         <main style={styles.paymentContent}>
           <h2 style={styles.pageTitle}>PAYMENT METHOD</h2>
           <div style={styles.paymentGrid}>
-            {/* Onsite Card */}
             <div style={styles.paymentCard}>
               <h3 style={styles.cardHeading}>ONSITE</h3>
               <p style={styles.cardDesc}>Pay your enrollment fee by visiting the cashier's office.</p>
-              <button style={styles.payActionBtn} onClick={() => setView('onsite')}
-                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fdd835'; e.currentTarget.style.transform = 'scale(1.05)'; }}
-                onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#e6e94e'; e.currentTarget.style.transform = 'scale(1)'; }}>
-                VIEW STEPS
-              </button>
+              <button style={styles.payActionBtn} onClick={() => setView('onsite')}>VIEW STEPS</button>
             </div>
-
-            {/* Online Card */}
             <div style={styles.paymentCard}>
               <h3 style={styles.cardHeading}>ONLINE</h3>
               <p style={styles.cardDesc}>View different payment channels and upload your reference number.</p>
-              <button style={styles.payActionBtn} onClick={() => setView('online')}
-                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fdd835'; e.currentTarget.style.transform = 'scale(1.05)'; }}
-                onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#e6e94e'; e.currentTarget.style.transform = 'scale(1)'; }}>
-                PROCEED
-              </button>
+              <button style={styles.payActionBtn} onClick={() => setView('online')}>PROCEED</button>
             </div>
           </div>
         </main>
-      )}
-
-      {view === 'onsite' && (
-        <OnsiteSteps
-          studentId={studentId}
-          formattedName={studentName}
-          onBack={() => setView('select')}
-        />
-      )}
-
-      {view === 'online' && (
-        <OnlinePayment
-          studentId={studentId}
-          formattedName={studentName}
-          onBack={() => setView('select')}
-        />
+      ) : view === 'onsite' ? (
+        <OnsiteSteps studentId={studentId} formattedName={studentName} onBack={() => setView('select')} />
+      ) : (
+        <OnlinePayment studentId={studentId} formattedName={studentName} onBack={() => setView('select')} />
       )}
     </DashboardLayout>
   );

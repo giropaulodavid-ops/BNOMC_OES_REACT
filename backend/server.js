@@ -133,6 +133,8 @@ const initStudentAssets = () => {
         id INT AUTO_INCREMENT PRIMARY KEY,
         student_id INT,
         reference_number VARCHAR(255),
+        semester VARCHAR(50),      
+        academic_year VARCHAR(50), 
         status VARCHAR(50) DEFAULT 'Pending',
         submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`;
@@ -376,42 +378,56 @@ app.post('/api/login', (req, res) => {
         }
     });
 
+// --- server.js ---
 app.get('/api/admin/verify-details/:id', (req, res) => {
     const studentId = req.params.id;
-    
-    const queries = {
-        student: "SELECT first_name, last_name FROM students WHERE student_id = ?",
-        // We select everything (*) to get all the image paths
-        docs: "SELECT * FROM document_submissions WHERE student_id = ? ORDER BY submitted_at DESC LIMIT 1",
-        doc_ver: "SELECT doc_status, admin_notes FROM document_verifications WHERE student_id = ?",
-        payment: "SELECT reference_number, status, official_receipt FROM payment_references WHERE student_id = ?"
-    };
+    // Extract filters from the URL query parameters
+    const { semester, academic_year } = req.query; 
 
-    const results = {};
+    const studentSql = `SELECT first_name, last_name FROM students WHERE student_id = ?`;
+    const docVerSql = `SELECT doc_status, admin_notes FROM document_verifications WHERE student_id = ?`;
+    const docsSql = `SELECT * FROM document_submissions WHERE student_id = ? ORDER BY submitted_at DESC LIMIT 1`;
 
-    db.query(queries.student, [studentId], (err, student) => {
-        if (err) return res.status(500).json({ error: "Student Query Error: " + err.message });
-        results.student = student[0] || { first_name: 'Unknown', last_name: 'Student' };
+    // UPDATED: Filter payment specifically by student, semester, and year
+    const paymentSql = `
+        SELECT id, reference_number, status, official_receipt 
+        FROM payment_references 
+        WHERE student_id = ? AND semester = ? AND academic_year = ?
+        ORDER BY id DESC LIMIT 1
+    `;
 
-        db.query(queries.docs, [studentId], (err, docs) => {
-            if (err) return res.status(500).json({ error: "Docs Query Error: " + err.message });
-            results.docs = docs[0] || {}; 
+    db.query(studentSql, [studentId], (err, studentRows) => {
+        if (err || !studentRows.length) return res.status(404).json({ error: "Student not found" });
+        const student = studentRows[0];
 
-            db.query(queries.doc_ver, [studentId], (err, doc_ver) => {
-                if (err) return res.status(500).json({ error: "Verif Query Error: " + err.message });
-                results.doc_ver = doc_ver[0] || { doc_status: 'Pending', admin_notes: '' };
+        db.query(docsSql, [studentId], (err, docsRows) => {
+            if (err) return res.status(500).json({ error: err.message });
+            const docs = docsRows[0] || {};
 
-                db.query(queries.payment, [studentId], (err, payment) => {
-                    if (err) return res.status(500).json({ error: "Payment Query Error: " + err.message });
-                    
-                    const p = payment[0] || {};
-                    results.payment = {
-                        reference_number: p.reference_number || 'N/A',
-                        status: p.status || 'Pending',
-                        official_receipt: p.official_receipt || '' // <--- THIS SAVES THE OR
-                    };
+            db.query(docVerSql, [studentId], (err, dvRows) => {
+                if (err) return res.status(500).json({ error: err.message });
+                const dv = dvRows[0] || {};
 
-                    res.json(results);
+                // Use semester and academic_year in the payment query
+                db.query(paymentSql, [studentId, semester, academic_year], (err, payRows) => {
+                    if (err) return res.status(500).json({ error: err.message });
+                    const payment = payRows[0] || {};
+
+                    res.json({
+                        student: { first_name: student.first_name, last_name: student.last_name },
+                        docs: docs,
+                        payment: {
+                            status: payment.status || 'Pending',
+                            reference_number: payment.reference_number || null,
+                            official_receipt: payment.official_receipt || null,
+                            semester: semester,
+                            school_year: academic_year
+                        },
+                        doc_ver: {
+                            doc_status: dv.doc_status || 'Pending',
+                            admin_notes: dv.admin_notes || ''
+                        }
+                    });
                 });
             });
         });
@@ -471,67 +487,89 @@ app.post('/api/admin/verify-documents/:id', (req, res) => {
     });
 });
 
-// 2. Route to save Payment Receipt (The OR Number)
-app.post('/api/admin/verify-payment/:id', (req, res) => {
-    const studentId = req.params.id;
-    const { official_receipt } = req.body;
+// 2. Route to save Payment Receipt (The OR Number) — period-aware
+    app.post('/api/admin/verify-payment/:id', (req, res) => {
+        const studentId = req.params.id;
+        const { official_receipt, semester, academic_year } = req.body;
 
-    // Use ORDER BY id DESC LIMIT 1 to make sure we hit the LATEST payment entry
-    // even if there are multiple rows for one student id
-    const sql = `
-        UPDATE payment_references 
-        SET official_receipt = ?, 
-            status = 'Verified', 
-            verified_at = NOW() 
-        WHERE student_id = ? 
-        ORDER BY id DESC LIMIT 1
-    `;
-
-    db.query(sql, [official_receipt, studentId], (err, result) => {
-        if (err) {
-            console.error("❌ SQL Error:", err.message);
-            return res.status(500).json({ error: err.message });
+        if (!official_receipt || !official_receipt.trim()) {
+            return res.status(400).json({ error: "OR Number is required." });
         }
-        
-        if (result.affectedRows === 0) {
-            // If no row exists yet, we should INSERT one instead of giving up
-            const insertSql = `INSERT INTO payment_references (student_id, reference_number, status, official_receipt, verified_at) VALUES (?, 'ONSITE', 'Verified', ?, NOW())`;
-            db.query(insertSql, [studentId, official_receipt], (insErr) => {
-                if (insErr) return res.status(500).json({ error: insErr.message });
-                return res.json({ success: true, message: "New payment record created and verified!" });
+
+        // Step 1: Find the payment record for THIS specific term
+        const findSql = `SELECT id FROM payment_references 
+                        WHERE student_id = ? AND semester = ? AND academic_year = ? 
+                        ORDER BY id DESC LIMIT 1`;
+
+        db.query(findSql, [studentId, semester, academic_year], (findErr, findRows) => {
+            if (findErr) return res.status(500).json({ error: findErr.message });
+
+            if (findRows.length === 0) {
+                // If no record exists for this term, create a new verified one (e.g., for walk-ins)
+                const insertSql = `
+                    INSERT INTO payment_references (student_id, reference_number, status, official_receipt, semester, academic_year, verified_at)
+                    VALUES (?, 'ONSITE', 'Verified', ?, ?, ?, NOW())
+                `;
+                return db.query(insertSql, [studentId, official_receipt.trim(), semester, academic_year], (insErr) => {
+                    if (insErr) return res.status(500).json({ error: insErr.message });
+                    res.json({ success: true, message: "New payment record created for this term!" });
+                });
+            }
+
+            // Step 2: Update the found record for that specific term
+            const paymentId = findRows[0].id;
+            const updateSql = `UPDATE payment_references SET official_receipt = ?, status = 'Verified', verified_at = NOW() WHERE id = ?`;
+            
+            db.query(updateSql, [official_receipt.trim(), paymentId], (err) => {
+                if (err) return res.status(500).json({ error: err.message });
+                res.json({ success: true, message: "Payment verified for the selected term!" });
             });
-        } else {
-            res.json({ success: true, message: "Payment verified and OR saved!" });
-        }
+        });
     });
-});
 
 app.get('/api/admin/students', (req, res) => {
+    const { academic_year, semester } = req.query;
+    const hasFilter = !!(academic_year && semester);
+
+    // 1. Get the latest enrollment ID for each student (filtered by period if provided)
+    const enrollmentSubquery = hasFilter
+        ? `SELECT student_id, MAX(id) AS latest_id
+           FROM enrollments
+           WHERE academic_year = ? AND semester = ?
+           GROUP BY student_id`
+        : `SELECT student_id, MAX(id) AS latest_id
+           FROM enrollments
+           GROUP BY student_id`;
+
+    // 2. The main query: 
+    // We join the payment_references table using BOTH student_id AND the specific period from the enrollment
     const sql = `
-        SELECT 
-            s.student_id, 
-            s.first_name, 
-            s.last_name, 
-            e.educational_level AS applied_level, 
+        SELECT
+            s.student_id,
+            s.first_name,
+            s.last_name,
+            e.educational_level AS applied_level,
+            e.semester,
+            e.academic_year,
             e.created_at AS applied_date,
-            dv.doc_status, 
-            pr.status AS pay_status
+            COALESCE(dv.doc_status, 'Pending') AS doc_status,
+            COALESCE(pr.status, 'Pending') AS pay_status
         FROM students s
-        LEFT JOIN enrollments e ON s.student_id = e.student_id
+        INNER JOIN (${enrollmentSubquery}) latest_e ON s.student_id = latest_e.student_id
+        INNER JOIN enrollments e ON e.id = latest_e.latest_id
         LEFT JOIN document_verifications dv ON s.student_id = dv.student_id
-        LEFT JOIN (
-            /* This subquery picks only the most recent payment record per student */
-            SELECT student_id, status 
-            FROM payment_references 
-            WHERE id IN (SELECT MAX(id) FROM payment_references GROUP BY student_id)
-        ) pr ON s.student_id = pr.student_id
-        GROUP BY s.student_id
-        ORDER BY s.student_id DESC
+        LEFT JOIN payment_references pr ON s.student_id = pr.student_id 
+            AND pr.semester = e.semester 
+            AND pr.academic_year = e.academic_year
+        ORDER BY e.created_at DESC
     `;
 
-    db.query(sql, (err, results) => {
+    // If filter exists, we pass academic_year and semester to the subquery
+    const queryValues = hasFilter ? [academic_year, semester] : [];
+
+    db.query(sql, queryValues, (err, results) => {
         if (err) {
-            console.error("SQL Error:", err);
+            console.error("SQL Error in /api/admin/students:", err.message);
             return res.status(500).json({ error: err.message });
         }
         res.json(results);
@@ -540,30 +578,33 @@ app.get('/api/admin/students', (req, res) => {
 
     // Get statistics for the dashboard cards
 app.get('/api/admin/stats', (req, res) => {
-    const sql = `
-        SELECT 
-            -- Total actual students
-            (SELECT COUNT(*) FROM students) as total,
+    const { academic_year, semester } = req.query;
 
-            -- Only people with existing student records who are verified
-            (SELECT COUNT(DISTINCT s.student_id) 
-             FROM students s 
-             JOIN document_verifications dv ON s.student_id = dv.student_id 
-             JOIN payment_references pr ON s.student_id = pr.student_id 
-             WHERE dv.doc_status = 'Verified' AND pr.status = 'Verified') as enrollees,
+    // Base queries that link to the specific enrollment period
+    const totalApplicantsSql = `SELECT COUNT(*) as count FROM enrollments WHERE academic_year = ? AND semester = ?`;
+    
+    const totalEnrolleesSql = `
+        SELECT COUNT(*) as count 
+        FROM payment_references 
+        WHERE status = 'Verified' AND academic_year = ? AND semester = ?`;
 
-            -- Only count pending if the student STILL EXISTS in the students table
-            (SELECT COUNT(DISTINCT ds.student_id) 
-             FROM document_submissions ds
-             INNER JOIN students s ON ds.student_id = s.student_id 
-             LEFT JOIN document_verifications dv ON ds.student_id = dv.student_id
-             LEFT JOIN payment_references pr ON ds.student_id = pr.student_id
-             WHERE (dv.doc_status IS NULL OR dv.doc_status != 'Verified') 
-                OR (pr.status IS NULL OR pr.status != 'Verified')) as pending
-    `;
-    db.query(sql, (err, result) => {
-        if (err) return res.status(500).json(err);
-        res.json(result[0]);
+    const pendingVerificationsSql = `
+        SELECT COUNT(*) as count 
+        FROM payment_references 
+        WHERE status = 'Pending' AND academic_year = ? AND semester = ?`;
+
+    // Execute all three queries in parallel
+    Promise.all([
+        new Promise((resolve, reject) => db.query(totalApplicantsSql, [academic_year, semester], (err, r) => err ? reject(err) : resolve(r[0].count))),
+        new Promise((resolve, reject) => db.query(totalEnrolleesSql, [academic_year, semester], (err, r) => err ? reject(err) : resolve(r[0].count))),
+        new Promise((resolve, reject) => db.query(pendingVerificationsSql, [academic_year, semester], (err, r) => err ? reject(err) : resolve(r[0].count)))
+    ])
+    .then(([total, enrollees, pending]) => {
+        res.json({ total, enrollees, pending });
+    })
+    .catch(err => {
+        console.error("Stats Error:", err.message);
+        res.status(500).json({ error: err.message });
     });
 });
 
@@ -663,30 +704,76 @@ app.post('/api/admin/update-doc-status/:id', (req, res) => {
 // --- SAVE RECEIPT & VERIFY PAYMENT ---
 app.post('/api/admin/save-receipt/:id', (req, res) => {
     const studentId = req.params.id;
-    const { orNumber } = req.body; // Changed from official_receipt to orNumber to match frontend
+    // Safely extract from body
+    const { orNumber, semester, academic_year } = req.body;
 
-    const sql = `
+    if (!orNumber) return res.status(400).json({ error: "OR Number is required" });
+
+    // 1. Update the payment_references table
+    // Matches your schema: status, official_receipt, semester, academic_year
+    const updatePaymentSql = `
         UPDATE payment_references 
-        SET official_receipt = ?, status = 'Verified', verified_at = NOW() 
-        WHERE student_id = ?
-        ORDER BY id DESC LIMIT 1
+        SET official_receipt = ?, status = 'Verified' 
+        WHERE student_id = ? AND semester = ? AND academic_year = ?
     `;
 
-    db.query(sql, [orNumber, studentId], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        
+    db.query(updatePaymentSql, [orNumber, studentId, semester, academic_year], (err, result) => {
+        if (err) {
+            console.error("Database Error:", err.message);
+            return res.status(500).json({ error: "Failed to update payment record." });
+        }
+
+        // 2. If no record exists (Onsite/Direct Payment), insert a new one
         if (result.affectedRows === 0) {
-            // If no record exists (e.g., student didn't click "Onsite" yet), create it
-            const insertSql = `INSERT INTO payment_references (student_id, reference_number, status, official_receipt, verified_at) VALUES (?, 'ONSITE', 'Verified', ?, NOW())`;
-            db.query(insertSql, [studentId, orNumber], (insErr) => {
+            const insertSql = `
+                INSERT INTO payment_references (student_id, reference_number, status, official_receipt, semester, academic_year)
+                VALUES (?, 'ONSITE', 'Verified', ?, ?, ?)
+            `;
+            db.query(insertSql, [studentId, orNumber, semester, academic_year], (insErr) => {
                 if (insErr) return res.status(500).json({ error: insErr.message });
-                res.json({ success: true, message: "OR Saved and Verified!" });
+                finishRequest(res, studentId, orNumber);
             });
         } else {
-            res.json({ success: true, message: "OR Saved and Verified!" });
+            finishRequest(res, studentId, orNumber);
         }
     });
 });
+
+// Simplified helper to avoid the NULL admin_id error
+function finishRequest(res, studentId, orNumber) {
+    // We use the 'activity_logs' table instead of 'admin_activity_log' 
+    // because 'activity_logs' is simpler and doesn't require an admin_id
+    const logSql = `INSERT INTO activity_logs (log_message) VALUES (?)`;
+    const logMessage = `Payment Verified for Student ID ${studentId} (OR: ${orNumber})`;
+
+    db.query(logSql, [logMessage], (logErr) => {
+        if (logErr) console.error("Log Error (Non-critical):", logErr.message);
+        
+        // Always return success if the payment was saved, even if logging fails
+        res.json({ 
+            success: true, 
+            message: "OR Number saved and student verified!" 
+        });
+    });
+}
+
+// Helper function to log the activity so it shows up in "Recent Activity" on the dashboard
+function logAndResponse(res, studentId, orNumber, semester, academic_year) {
+    const logSql = `
+        INSERT INTO admin_activity_log (student_id, activity_text) 
+        VALUES (?, ?)
+    `;
+    const logText = `Verified Payment (OR: ${orNumber}) for ${semester} S.Y. ${academic_year}`;
+
+    db.query(logSql, [studentId, logText], (logErr) => {
+        if (logErr) console.error("Activity Log Error:", logErr.message);
+        
+        res.json({ 
+            success: true, 
+            message: `Payment Verified for ${semester} S.Y. ${academic_year}` 
+        });
+    });
+}
 
 app.get('/api/admin/submissions', (req, res) => {
     const sql = `
@@ -914,38 +1001,62 @@ app.get('/api/student/:id/documents', (req, res) => {
     });
 });
 
-app.post('/api/student/:id/payment', upload.single('payment_proof'), (req, res) => {
-    const studentId = req.params.id;
-    const { reference_number } = req.body;
-    const proofPath = req.file ? req.file.path.replace(/\\/g, '/') : null;
+    app.get('/api/student/:id/payment', (req, res) => {
+        const studentId = req.params.id;
+        const { semester, academic_year } = req.query; // Get from frontend params
 
-    const insertSql = `INSERT INTO payment_references (student_id, reference_number, payment_proof) VALUES (?, ?, ?)`;
-    db.query(insertSql, [studentId, reference_number, proofPath], (insertErr) => {
-        if (insertErr) return res.status(500).json({ error: "Database error" });
-        res.json({ success: true });
+        const sql = `SELECT * FROM payment_references 
+                    WHERE student_id = ? AND semester = ? AND academic_year = ? 
+                    LIMIT 1`;
+
+        db.query(sql, [studentId, semester, academic_year], (err, results) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json(results[0] || {}); // Return the first match or empty object
+        });
     });
-});
+    app.post('/api/student/:id/payment', (req, res) => {
+        const studentId = req.params.id;
+        const { reference_number, semester, academic_year } = req.body;
 
-app.post('/api/student/:id/payment', (req, res) => {
-    const studentId = req.params.id;
-    const { reference_number } = req.body;
+        const sql = `INSERT INTO payment_references 
+                    (student_id, reference_number, semester, academic_year, status) 
+                    VALUES (?, ?, ?, ?, 'Pending')`;
 
-    const ensureTable = `CREATE TABLE IF NOT EXISTS payment_references (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        student_id INT,
-        reference_number VARCHAR(255),
-        status VARCHAR(50) DEFAULT 'Pending',
-        submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`;
-
-    db.query(ensureTable, (createErr) => {
-        if (createErr) return res.status(500).json({ error: "Database error" });
-
-        const insertSql = `INSERT INTO payment_references (student_id, reference_number) VALUES (?, ?)`;
-        db.query(insertSql, [studentId, reference_number], (insertErr) => {
-            if (insertErr) return res.status(500).json({ error: "Database error" });
+        db.query(sql, [studentId, reference_number, semester, academic_year], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
             res.json({ success: true });
         });
+    });
+
+// --- server.js ---
+
+app.get('/api/admin/pending-payments', (req, res) => {
+    // Get filters from query parameters
+    const { semester, school_year } = req.query;
+
+    let query = `
+        SELECT p.*, s.first_name, s.last_name, e.semester, e.school_year
+        FROM payments p
+        JOIN students s ON p.student_id = s.student_id
+        JOIN enrollment_applications e ON p.student_id = e.student_id
+        WHERE p.payment_status = 'Pending'
+    `;
+
+    const params = [];
+
+    // Add filtering logic if parameters are provided
+    if (semester && semester !== 'All') {
+        query += ` AND e.semester = ?`;
+        params.push(semester);
+    }
+    if (school_year && school_year !== 'All') {
+        query += ` AND e.school_year = ?`;
+        params.push(school_year);
+    }
+
+    db.query(query, params, (err, results) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(results);
     });
 });
 
@@ -1230,6 +1341,27 @@ app.post('/api/student/:id/documents-submit', (req, res) => {
         res.json({ success: true, message: 'Documents submitted successfully' });
     });
 });
+
+    app.get('/api/student/:id/status', (req, res) => {
+        const { id } = req.params;
+        const { semester, academic_year } = req.query;
+
+        const sql = `
+            SELECT p.reference_number, p.payment_status 
+            FROM payments p 
+            WHERE p.student_id = ? AND p.semester = ? AND p.academic_year = ?
+            LIMIT 1
+        `;
+
+        db.query(sql, [id, semester, academic_year], (err, results) => {
+            if (err) return res.status(500).json({ error: err.message });
+            if (results.length > 0) {
+                res.json(results[0]);
+            } else {
+                res.json({ reference_number: null });
+            }
+        });
+    });
 
 app.listen(5000, '0.0.0.0', () => {
     console.log("🚀 Server running on http://127.0.0.1:5000");

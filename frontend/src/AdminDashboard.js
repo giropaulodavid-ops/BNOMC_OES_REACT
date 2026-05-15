@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const AdminDashboard = () => {
@@ -6,16 +6,49 @@ const AdminDashboard = () => {
     const [stats, setStats] = useState({ total: 0, enrollees: 0, pending: 0 });
     const [students, setStudents] = useState([]);
     const [activities, setActivities] = useState([]);
-    // State initialized with empty strings
     const [settings, setSettings] = useState({ academic_year: '', semester: '', status: 'Open' });
+
+    // Filter state — defaults to current active period, then admin can change
+    const [filterAY, setFilterAY] = useState('');
+    const [filterSemester, setFilterSemester] = useState('');
+    const [filterLoading, setFilterLoading] = useState(false);
+
+    // Build a list of school year options (current year ±3)
+    const currentYear = new Date().getFullYear();
+    const ayOptions = Array.from({ length: 6 }, (_, i) => {
+        const y = currentYear - 2 + i;
+        return `${y}-${y + 1}`;
+    });
+    const semesterOptions = ['1st Semester', '2nd Semester', 'Summer'];
+
+    const fetchStats = useCallback(async (ay, sem) => {
+        if (!ay || !sem) return;
+        try {
+            const params = new URLSearchParams({ academic_year: ay, semester: sem });
+            const res = await fetch(`http://localhost:5000/api/admin/stats?${params}`);
+            const data = await res.json();
+            setStats(data);
+        } catch (err) {
+            console.error("Error fetching stats:", err);
+        }
+    }, []);
+    
+    // Fetch students filtered by semester + school year
+    const fetchStudents = useCallback(async (ay, sem) => {
+        if (!ay || !sem) return;
+        try {
+            const params = new URLSearchParams({ academic_year: ay, semester: sem });
+            const res = await fetch(`http://localhost:5000/api/admin/students?${params}`);
+            const data = await res.json();
+            setStudents(Array.isArray(data) ? data : []);
+        } catch (err) {
+            console.error("Error fetching students:", err);
+        }
+    }, []);
 
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const resStudents = await fetch('http://localhost:5000/api/admin/students');
-                const dataStudents = await resStudents.json();
-                setStudents(Array.isArray(dataStudents) ? dataStudents : []);
-
                 const resStats = await fetch('http://localhost:5000/api/admin/stats');
                 const dataStats = await resStats.json();
                 setStats(dataStats);
@@ -26,20 +59,44 @@ const AdminDashboard = () => {
 
                 const resSettings = await fetch('http://localhost:5000/api/system-settings');
                 const dataSettings = await resSettings.json();
-                
-                // FIX: Added fallbacks (|| '') to ensure state never becomes undefined
+
+                const activeAY = dataSettings.academic_year || dataSettings.current_academic_year || '';
+                const activeSem = dataSettings.semester || dataSettings.current_semester || '1st';
+
                 setSettings({
-                    academic_year: dataSettings.current_academic_year || '',
-                    semester: dataSettings.current_semester || '',
+                    academic_year: activeAY,
+                    semester: activeSem,
                     status: dataSettings.enrollment_status || 'Open'
                 });
-                
+
+                // Default filter to active period
+                setFilterAY(activeAY);
+                setFilterSemester(activeSem);
+
+                // Fetch students for active period
+                if (activeAY && activeSem) {
+                    const params = new URLSearchParams({ academic_year: activeAY, semester: activeSem });
+                    const resStudents = await fetch(`http://localhost:5000/api/admin/students?${params}`);
+                    const dataStudents = await resStudents.json();
+                    setStudents(Array.isArray(dataStudents) ? dataStudents : []);
+                }
+
             } catch (err) {
                 console.error("Failed to fetch dashboard data:", err);
             }
         };
         fetchData();
     }, []);
+
+    useEffect(() => {
+        if (filterAY && filterSemester) {
+            // Using your existing fetch functions with parameters
+            fetchStudents(filterAY, filterSemester);
+            fetchStats(filterAY, filterSemester);
+        }
+    }, [filterAY, filterSemester, fetchStudents, fetchStats]);
+
+
 
     const handleLogout = () => {
         localStorage.clear();
@@ -147,7 +204,7 @@ const AdminDashboard = () => {
                                                 color: settings.semester === sem ? "white" : "#666",
                                                 transition: "all 0.2s"
                                             }}
-                                        >{sem.toUpperCase()}</button>
+                                        >{sem}</button>
                                     ))}
                                 </div>
                             </div>
@@ -186,6 +243,48 @@ const AdminDashboard = () => {
                         </div>
                     </div>
 
+                    {/* Semester / School Year Filter */}
+                    <div style={{ background: "rgba(255,255,255,0.95)", padding: "20px 25px", borderRadius: "15px", marginBottom: "20px", boxShadow: "0 4px 15px rgba(0,0,0,0.08)", borderLeft: "8px solid #e6e94e", display: "flex", flexWrap: "wrap", gap: "20px", alignItems: "flex-end" }}>
+                        <div>
+                            <label style={{ display: "block", fontSize: "0.7rem", fontWeight: 800, marginBottom: "6px", color: "#666", textTransform: "uppercase" }}>School Year</label>
+                            <select
+                                value={filterAY}
+                                onChange={e => setFilterAY(e.target.value)}
+                                style={{ padding: "9px 14px", borderRadius: "8px", border: "2px solid #0a4d92", fontWeight: 700, fontSize: "0.85rem", color: "#0a4d92", background: "white", cursor: "pointer", minWidth: "140px" }}
+                            >
+                                <option value="">-- Select AY --</option>
+                                {ayOptions.map(ay => (
+                                    <option key={ay} value={ay}>{ay}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label style={{ display: "block", fontSize: "0.7rem", fontWeight: 800, marginBottom: "6px", color: "#666", textTransform: "uppercase" }}>Semester</label>
+                            <div style={{ display: "flex", gap: "8px" }}>
+                                {semesterOptions.map(sem => (
+                                    <button
+                                        key={sem}
+                                        onClick={() => setFilterSemester(sem)}
+                                        style={{ padding: "9px 18px", border: "2px solid #0a4d92", borderRadius: "8px", cursor: "pointer", fontWeight: 800, fontSize: "0.8rem", backgroundColor: filterSemester === sem ? "#0a4d92" : "white", color: filterSemester === sem ? "white" : "#0a4d92", transition: "all 0.2s" }}
+                                    >{sem.toUpperCase()}</button>
+                                ))}
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => fetchStudents(filterAY, filterSemester)}
+                            disabled={!filterAY || !filterSemester || filterLoading}
+                            style={{ background: (!filterAY || !filterSemester) ? "#ccc" : "#0a4d92", color: "white", padding: "10px 24px", borderRadius: "10px", border: "none", cursor: (!filterAY || !filterSemester) ? "not-allowed" : "pointer", fontWeight: 900, fontSize: "0.85rem", transition: "all 0.2s" }}
+                        >
+                            {filterLoading ? "Loading..." : "FILTER"}
+                        </button>
+                        {filterAY && filterSemester && (
+                            <div style={{ marginLeft: "auto", background: "#0a4d92", color: "white", padding: "10px 18px", borderRadius: "10px", fontSize: "0.8rem", fontWeight: 800 }}>
+                                Showing: <span style={{ color: "#e6e94e" }}>{filterSemester} Semester, AY {filterAY}</span>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Students Table */}
                     <div style={{ background: "rgba(255, 255, 255, 0.9)", borderRadius: "15px", boxShadow: "0 10px 30px rgba(0,0,0,0.1)", overflow: "hidden" }}>
                         <table style={{ width: "100%", borderCollapse: "collapse" }}>
                             <thead>
@@ -193,45 +292,50 @@ const AdminDashboard = () => {
                                     <th style={{ padding: "15px", textAlign: "center", fontSize: "0.8rem", fontWeight: 800 }}>STUDENT ID</th>
                                     <th style={{ padding: "15px", textAlign: "center", fontSize: "0.8rem", fontWeight: 800 }}>STUDENT NAME</th>
                                     <th style={{ padding: "15px", textAlign: "center", fontSize: "0.8rem", fontWeight: 800 }}>APPLIED LEVEL</th>
-                                    <th style={{ padding: "15px", textAlign: "center", fontSize: "0.8rem", fontWeight: 800 }}>DATE</th>
+                                    <th style={{ padding: "15px", textAlign: "center", fontSize: "0.8rem", fontWeight: 800 }}>SEMESTER</th>
+                                    <th style={{ padding: "15px", textAlign: "center", fontSize: "0.8rem", fontWeight: 800 }}>SCHOOL YEAR</th>
                                     <th style={{ padding: "15px", textAlign: "center", fontSize: "0.8rem", fontWeight: 800 }}>DOCUMENTS</th>
                                     <th style={{ padding: "15px", textAlign: "center", fontSize: "0.8rem", fontWeight: 800 }}>PAYMENT</th>
                                     <th style={{ padding: "15px", textAlign: "center", fontSize: "0.8rem", fontWeight: 800 }}>ACTION</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {students.length > 0 ? students.map((student) => (
+                                {filterLoading ? (
+                                    <tr><td colSpan="8" style={{ padding: "30px", textAlign: "center", color: "#0a4d92", fontWeight: 600 }}>Loading students...</td></tr>
+                                ) : students.length > 0 ? students.map((student) => (
                                     <tr key={student.student_id} style={{ borderBottom: "1px solid #ddd" }}>
                                         <td style={{ padding: "15px", textAlign: "center", fontWeight: 600 }}>{String(student.student_id).padStart(4, '0')}</td>
                                         <td style={{ padding: "15px", textAlign: "center", fontWeight: 700 }}>{`${student.last_name}, ${student.first_name}`}</td>
                                         <td style={{ padding: "15px", textAlign: "center", fontWeight: 600 }}>{student.applied_level || 'N/A'}</td>
-                                        <td style={{ padding: "15px", textAlign: "center", fontWeight: 600 }}>{student.applied_date ? new Date(student.applied_date).toLocaleDateString() : 'N/A'}</td>
-                                        
+                                        <td style={{ padding: "15px", textAlign: "center", fontWeight: 600 }}>{student.semester || filterSemester || 'N/A'}</td>
+                                        <td style={{ padding: "15px", textAlign: "center", fontWeight: 600 }}>{student.academic_year || filterAY || 'N/A'}</td>
+
                                         <td style={{ padding: "15px", textAlign: "center" }}>
-                                            <span style={{ 
-                                                padding: "5px 12px", borderRadius: "5px", fontSize: "0.75rem", fontWeight: 800,
-                                                background: student.doc_status === 'Verified' ? '#00ff00' : 
-                                                            student.doc_status === 'Rejected' ? '#ff4d4d' : '#ffff00',
-                                                color: "#000", display: "inline-block", minWidth: "90px"
-                                            }}>{student.doc_status || 'Pending'}</span>
+                                            <span style={{ padding: "5px 12px", borderRadius: "5px", fontSize: "0.75rem", fontWeight: 800, background: student.doc_status === 'Verified' ? '#00cc44' : student.doc_status === 'Rejected' ? '#ff4d4d' : '#ffcc00', color: "#000", display: "inline-block", minWidth: "90px" }}>
+                                                {student.doc_status || 'Pending'}
+                                            </span>
                                         </td>
 
                                         <td style={{ padding: "15px", textAlign: "center" }}>
-                                            <span style={{ 
-                                                padding: "5px 12px", borderRadius: "5px", fontSize: "0.75rem", fontWeight: 800,
-                                                background: student.pay_status === 'Verified' ? '#00ff00' : 
-                                                            student.pay_status === 'Rejected' ? '#ff4d4d' : '#ffff00',
-                                                color: "#000", display: "inline-block", minWidth: "90px"
-                                            }}>{student.pay_status || 'Pending'}</span>
+                                            <span style={{ padding: "5px 12px", borderRadius: "5px", fontSize: "0.75rem", fontWeight: 800, background: student.pay_status === 'Verified' ? '#00cc44' : student.pay_status === 'Rejected' ? '#ff4d4d' : '#ffcc00', color: "#000", display: "inline-block", minWidth: "90px" }}>
+                                                {student.pay_status || 'Pending'}
+                                            </span>
                                         </td>
 
                                         <td style={{ padding: "15px", textAlign: "center" }}>
                                             <button onClick={() => navigate(`/admin/student/${student.student_id}`)} style={{ background: "#8c9096", color: "white", border: "none", padding: "5px 15px", borderRadius: "15px", fontWeight: 700, fontSize: "0.75rem", cursor: "pointer", marginRight: "5px" }}>DETAIL</button>
-                                            <button onClick={() => navigate(`/admin/verify/${student.student_id}`)} style={{ background: "#8c9096", color: "white", border: "none", padding: "5px 15px", borderRadius: "15px", fontWeight: 700, fontSize: "0.75rem", cursor: "pointer" }}>VERIFY</button>
+                                            <button
+                                                onClick={() => navigate(`/admin/verify/${student.student_id}?semester=${encodeURIComponent(filterSemester)}&academic_year=${encodeURIComponent(filterAY)}`)}
+                                                style={{ background: "#0a4d92", color: "white", border: "none", padding: "5px 15px", borderRadius: "15px", fontWeight: 700, fontSize: "0.75rem", cursor: "pointer" }}
+                                            >VERIFY</button>
                                         </td>
                                     </tr>
                                 )) : (
-                                    <tr><td colSpan="7" style={{ padding: "30px", textAlign: "center", color: "#888", fontWeight: 600 }}>No applicants found.</td></tr>
+                                    <tr><td colSpan="8" style={{ padding: "30px", textAlign: "center", color: "#888", fontWeight: 600 }}>
+                                        {filterAY && filterSemester
+                                            ? `No applicants found for ${filterSemester} Semester, AY ${filterAY}.`
+                                            : 'Select a school year and semester to view applicants.'}
+                                    </td></tr>
                                 )}
                             </tbody>
                         </table>

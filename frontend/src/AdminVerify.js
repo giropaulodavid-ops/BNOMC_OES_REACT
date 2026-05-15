@@ -1,15 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
 const AdminVerify = () => {
     const { id } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
+
+    // Read semester and academic_year passed from AdminDashboard via URL query params
+    const queryParams = new URLSearchParams(location.search);
+    const semester = queryParams.get('semester') || '';
+    const academicYear = queryParams.get('academic_year') || '';
+
     const [data, setData] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
 
     const [docStatus, setDocStatus] = useState("Pending");
     const [docNotes, setDocNotes] = useState("");
     const [orNumber, setOrNumber] = useState("");
+    const [payAlreadyVerified, setPayAlreadyVerified] = useState(false);
 
     const docLabels = {
         psa_birth_certificate: 'PSA Birth Certificate',
@@ -21,30 +29,56 @@ const AdminVerify = () => {
     };
 
     useEffect(() => {
-        fetch(`http://localhost:5000/api/admin/verify-details/${id}`)
-            .then(res => res.json())
+        // We MUST have the period to fetch the correct data
+        if (!semester || !academicYear) {
+            setIsLoading(false);
+            return;
+        }
+
+        const params = new URLSearchParams();
+        params.set('semester', semester);
+        params.set('academic_year', academicYear);
+
+        // API call now includes the period in the query string to fetch specific payment records
+        fetch(`http://localhost:5000/api/admin/verify-details/${id}?${params.toString()}`)
+            .then(res => {
+                if (!res.ok) throw new Error("Server Error");
+                return res.json();
+            })
             .then(resData => {
                 setData(resData);
+                
+                // Initialize form values from the database record of THIS specific period
                 setDocStatus(resData.doc_ver?.doc_status || "Pending");
                 setDocNotes(resData.doc_ver?.admin_notes || "");
-                setOrNumber(resData.payment?.official_receipt || "");
+                
+                const existingOR = resData.payment?.official_receipt || "";
+                setOrNumber(existingOR);
+                
+                // The UI locks if THIS specific period is already verified
+                setPayAlreadyVerified(resData.payment?.status === 'Verified');
                 setIsLoading(false);
             })
-            .catch(err => console.error(err));
-    }, [id]);
+            .catch(err => {
+                console.error("Fetch Error:", err);
+                setIsLoading(false);
+            });
+    }, [id, semester, academicYear]);
 
     const handleAction = async (actionType) => {
         try {
             let endpoint = "";
-            let payload = {};
+            let payload = {
+                semester: semester,
+                academic_year: academicYear
+            };
 
             if (actionType === 'update_doc_status') {
-                endpoint = `http://localhost:5000/api/admin/update-doc-status/${id}`;
-                payload = { status: docStatus, notes: docNotes };
+                endpoint = `http://localhost:5000/api/admin/verify-documents/${id}`;
+                payload = { ...payload, status: docStatus, notes: docNotes };
             } else if (actionType === 'save_receipt') {
-                if (!orNumber) return alert("Please enter an OR Number");
                 endpoint = `http://localhost:5000/api/admin/save-receipt/${id}`;
-                payload = { orNumber: orNumber };
+                payload = { ...payload, orNumber: orNumber };
             }
 
             const response = await fetch(endpoint, {
@@ -54,19 +88,20 @@ const AdminVerify = () => {
             });
 
             if (response.ok) {
-                alert("Updated successfully!");
-                // Refresh data to show "Verified" immediately
-                window.location.reload(); 
+                alert(`Successfully updated for ${semester} S.Y. ${academicYear}`);
+                window.location.reload();
             } else {
-                alert("Failed to update.");
+                const errData = await response.json().catch(() => ({}));
+                alert("Failed to update: " + (errData.error || 'Unknown Error'));
             }
         } catch (err) {
-            console.error(err);
-            alert("Server error.");
+            console.error("Update Error:", err);
+            alert("Server connection error.");
         }
     };
 
     if (isLoading) return null;
+    if (!data) return <div style={{textAlign:'center', marginTop: '50px', color: 'white'}}>Error: No data found for this period.</div>;
 
     const s = {
         wrapper: { minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative', fontFamily: "'Montserrat', sans-serif" },
@@ -76,9 +111,8 @@ const AdminVerify = () => {
         card: { background: "#0a4d92", borderRadius: "14px", overflow: "hidden", marginBottom: "30px", color: 'white', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' },
         cardHeader: { background: "#083d75", padding: "12px 20px", fontWeight: "800", color: "#e6e94e", display: 'flex', justifyContent: 'space-between' },
         row: { padding: "20px", borderBottom: "1px solid rgba(255,255,255,0.1)" },
-        img: { width: "100%", maxWidth: "350px", height: "auto", borderRadius: "10px", border: "4px solid white", marginTop: "10px" },
+        img: { width: "100%", maxWidth: "350px", height: "auto", borderRadius: "10px", border: "4px solid white", marginTop: "10px", cursor: 'pointer' },
         label: { fontWeight: "700", color: "#e6e94e", fontSize: "0.85rem", marginBottom: '8px', display: 'block' },
-        // Added color: 'black' here so you can see the text/choices
         input: { width: "100%", padding: "12px", borderRadius: "8px", border: "none", marginBottom: "15px", fontWeight: "600", color: 'black', backgroundColor: 'white' },
         saveBtn: { width: "100%", background: "#e6e94e", color: "#073b75", padding: "15px", borderRadius: "10px", fontWeight: "900", border: "none", cursor: 'pointer' }
     };
@@ -123,19 +157,22 @@ const AdminVerify = () => {
                 <div style={s.card}>
                     <div style={s.cardHeader}>
                         <span>PAYMENT VERIFICATION</span>
-                        {/* DYNAMIC STATUS TAG */}
-                        <span style={{ 
-                            color: data.payment?.status === 'Verified' ? '#4caf50' : '#ff9800',
-                            fontSize: '0.8rem' 
-                        }}>
-                            {data.payment?.status?.toUpperCase() || 'PENDING'}
+                        <span style={{ color: payAlreadyVerified ? '#4caf50' : '#ff9800', fontSize: '0.8rem' }}>
+                            {payAlreadyVerified ? 'VERIFIED' : 'PENDING'}
                         </span>
                     </div>
-                    
+
+                    <div style={{ ...s.row, background: 'rgba(230, 233, 78, 0.12)', borderBottom: '2px solid #e6e94e' }}>
+                        <div style={s.label}>VERIFYING PERIOD:</div>
+                        <div style={{ fontSize: '1.1rem', fontWeight: '800', color: '#fff' }}>
+                            {semester} &nbsp;|&nbsp; S.Y. {academicYear}
+                        </div>
+                    </div>
+
                     <div style={s.row}>
-                        <div style={s.label}>REFERENCE NUMBER:</div>
+                        <div style={s.label}>REFERENCE NUMBER (submitted by student):</div>
                         <div style={{ fontSize: '1.5rem', fontWeight: '900', color: '#e6e94e' }}>
-                            {data.payment?.reference_number || "N/A"}
+                            {data.payment?.reference_number || 'No payment submitted yet'}
                         </div>
                     </div>
 
@@ -144,19 +181,23 @@ const AdminVerify = () => {
                         <input 
                             style={{ 
                                 ...s.input, 
-                                backgroundColor: data.payment?.official_receipt ? '#2a2a2a' : '#fff',
-                                color: data.payment?.official_receipt ? '#4caf50' : '#000',
-                                cursor: data.payment?.official_receipt ? 'not-allowed' : 'text',
-                                border: data.payment?.official_receipt ? '1px solid #4caf50' : 'none'
+                                backgroundColor: payAlreadyVerified ? '#2a2a2a' : '#fff',
+                                color: payAlreadyVerified ? '#4caf50' : '#000',
+                                cursor: payAlreadyVerified ? 'not-allowed' : 'text',
+                                border: payAlreadyVerified ? '1px solid #4caf50' : 'none'
                             }} 
                             value={orNumber} 
-                            onChange={(e) => setOrNumber(e.target.value)} 
-                            placeholder={data.payment?.official_receipt ? "" : "Enter OR Number..."}
-                            readOnly={!!data.payment?.official_receipt} 
+                            onChange={(e) => !payAlreadyVerified && setOrNumber(e.target.value)} 
+                            placeholder={payAlreadyVerified ? "" : "Enter OR Number..."}
+                            readOnly={payAlreadyVerified}
                         />
                         
-                        {!data.payment?.official_receipt ? (
-                            <button style={s.saveBtn} onClick={() => handleAction('save_receipt')}>
+                        {!payAlreadyVerified ? (
+                            <button
+                                style={s.saveBtn}
+                                onClick={() => handleAction('save_receipt')}
+                                disabled={!data.payment?.reference_number}
+                            >
                                 💾 SAVE & VERIFY PAYMENT
                             </button>
                         ) : (
@@ -168,7 +209,7 @@ const AdminVerify = () => {
                                 color: '#4caf50',
                                 fontWeight: 'bold'
                             }}>
-                                ✅ PAYMENT RECORDED PERMANENTLY
+                                ✅ PAYMENT RECORDED — OR: {orNumber}
                             </div>
                         )}
                     </div>
