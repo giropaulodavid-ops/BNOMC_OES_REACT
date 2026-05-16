@@ -111,7 +111,7 @@ const EditProfile = () => {
     const cardStyle = {
         background: '#0B4E94',
         borderRadius: 12,
-        padding: '32px',
+        padding: '20px 28px',
         boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
         marginBottom: 28,
     };
@@ -130,11 +130,11 @@ const EditProfile = () => {
         width: '100%',
         background: '#fff',
         borderRadius: 8,
-        padding: '11px 14px',
+        padding: '9px 12px',
         border: 'none',
         outline: 'none',
         fontFamily: 'Montserrat, sans-serif',
-        fontSize: '0.92rem',
+        fontSize: '0.88rem',
         fontWeight: 600,
         color: '#1a1a2e',
         boxSizing: 'border-box',
@@ -149,8 +149,8 @@ const EditProfile = () => {
         borderBottom: '1px solid rgba(255,255,255,0.25)',
     };
 
-    const grid3 = { display: 'grid', gridTemplateColumns: '1fr', gap: 20 };
-    const grid2 = { display: 'grid', gridTemplateColumns: '1fr', gap: 20 };
+    const grid3 = { display: 'grid', gridTemplateColumns: '1fr', gap: 12 };
+    const grid2 = { display: 'grid', gridTemplateColumns: '1fr', gap: 12 };
 
     return (
         <div style={{ fontFamily: "'Montserrat', sans-serif", minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative' }}>
@@ -205,7 +205,7 @@ const EditProfile = () => {
                     </div>
                 )}
 
-                <form onSubmit={handleSave} style={{ width: '100%', maxWidth: 900 }}>
+                <form onSubmit={handleSave} style={{ width: '100%', maxWidth: '750px' }}>
 
                     {/* ── Student Information ── */}
                     <div style={cardStyle}>

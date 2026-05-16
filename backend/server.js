@@ -151,8 +151,79 @@ const initStudentAssets = () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`;
 
+    const createStudentsTable = `CREATE TABLE IF NOT EXISTS students (
+        student_id INT AUTO_INCREMENT PRIMARY KEY,
+        password VARCHAR(255),
+        first_name VARCHAR(255),
+        middle_name VARCHAR(255),
+        last_name VARCHAR(255),
+        date_of_birth DATE,
+        religion VARCHAR(100),
+        gender VARCHAR(50),
+        contact_number VARCHAR(50),
+        email_address VARCHAR(255) UNIQUE,
+        guardian_first_name VARCHAR(255),
+        guardian_middle_name VARCHAR(255),
+        guardian_last_name VARCHAR(255),
+        guardian_birth_date DATE,
+        guardian_occupation VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`;
+
+    const createSettingsTable = `CREATE TABLE IF NOT EXISTS system_settings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        setting_key VARCHAR(255) UNIQUE,
+        setting_value VARCHAR(255),
+        academic_year VARCHAR(50),
+        semester VARCHAR(50),
+        enrollment_status VARCHAR(50) DEFAULT 'Open'
+    )`;
+
+    const createAdminActivityLogTable = `CREATE TABLE IF NOT EXISTS admin_activity_log (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        student_id INT,
+        activity_text TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`;
+
+    const createActivityLogsTable = `CREATE TABLE IF NOT EXISTS activity_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        log_message TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`;
+
+    const createDocVerificationsTable = `CREATE TABLE IF NOT EXISTS document_verifications (
+        student_id INT PRIMARY KEY,
+        doc_status VARCHAR(50) DEFAULT 'Pending',
+        admin_notes TEXT,
+        verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`;
+
     ensureEducationalBackgroundSchema((err) => {
         if (err) console.error("❌ Failed to ensure educational_background schema:", err.message);
+    });
+    db.query(createStudentsTable, (err) => {
+        if (err) console.error("❌ Failed to create students table:", err.message);
+    });
+    db.query(createSettingsTable, (err) => {
+        if (err) console.error("❌ Failed to create system_settings table:", err.message);
+        else {
+            db.query("SELECT COUNT(*) AS count FROM system_settings", (countErr, rows) => {
+                if (!countErr && rows[0]?.count === 0) {
+                    const currentYear = new Date().getFullYear();
+                    db.query("INSERT INTO system_settings (id, academic_year, semester, enrollment_status) VALUES (1, ?, '1st', 'Open')", [`${currentYear}-${currentYear + 1}`]);
+                }
+            });
+        }
+    });
+    db.query(createAdminActivityLogTable, (err) => {
+        if (err) console.error("❌ Failed to create admin_activity_log table:", err.message);
+    });
+    db.query(createActivityLogsTable, (err) => {
+        if (err) console.error("❌ Failed to create activity_logs table:", err.message);
+    });
+    db.query(createDocVerificationsTable, (err) => {
+        if (err) console.error("❌ Failed to create document_verifications table:", err.message);
     });
     db.query(createDocumentsTable, (err) => {
         if (err) console.error("❌ Failed to create document_submissions table:", err.message);
@@ -1219,9 +1290,15 @@ app.post('/api/admin/student/:id/payment', (req, res) => {
 
             // Check if student has a verified enrollment in the CURRENT term
             const sql = `
-                SELECT e.id, dv.doc_status 
+                SELECT 
+                    e.id, 
+                    dv.doc_status,
+                    pr.status AS pay_status
                 FROM enrollments e
                 LEFT JOIN document_verifications dv ON e.student_id = dv.student_id
+                LEFT JOIN payment_references pr ON e.student_id = pr.student_id 
+                    AND pr.academic_year = e.academic_year 
+                    AND pr.semester = e.semester
                 WHERE e.student_id = ?
                 AND e.academic_year = ?
                 AND e.semester = ?
@@ -1230,9 +1307,17 @@ app.post('/api/admin/student/:id/payment', (req, res) => {
                 if (err) return res.status(500).json({ error: err.message });
                 if (results.length === 0) return res.json({ enrolled: false, status: 'Pending' });
 
+                const docStatus = results[0].doc_status || 'Pending';
+                const payStatus = results[0].pay_status || 'Pending';
+                
+                // User is officially enrolled ONLY if both documents and payment are verified
+                const isFullyVerified = (docStatus === 'Verified' && payStatus === 'Verified');
+
                 res.json({
                     enrolled: true,
-                    status: results[0].doc_status || 'Pending'
+                    status: isFullyVerified ? 'Verified' : 'Pending',
+                    doc_status: docStatus,
+                    pay_status: payStatus
                 });
             });
         });

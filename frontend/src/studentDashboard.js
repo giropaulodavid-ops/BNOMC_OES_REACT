@@ -14,11 +14,11 @@ const Field = ({ label, value }) => (
             readOnly
             value={value || 'N/A'}
             style={{
-                width: '100%', padding: '10px 14px',
+                width: '100%', padding: '8px 12px',
                 borderRadius: 10, border: 'none',
                 background: '#fff', color: '#1a1a2e',
                 fontFamily: 'Montserrat, sans-serif',
-                fontSize: '0.9rem', fontWeight: 600,
+                fontSize: '0.85rem', fontWeight: 600,
                 outline: 'none', boxSizing: 'border-box',
             }}
         />
@@ -29,7 +29,7 @@ const Field = ({ label, value }) => (
 const Card = ({ children }) => (
     <div style={{
         background: '#0a4d92',
-        borderRadius: 16, padding: '22px 28px',
+        borderRadius: 16, padding: '16px 24px',
         boxShadow: '0 4px 18px rgba(0,0,0,0.18)',
     }}>
         {children}
@@ -37,10 +37,10 @@ const Card = ({ children }) => (
 );
 
 const Grid3 = ({ children }) => (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }}>{children}</div>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>{children}</div>
 );
 const Grid2 = ({ children }) => (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }}>{children}</div>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>{children}</div>
 );
 
 // ── Main component ────────────────────────────────────────
@@ -122,7 +122,7 @@ const StudentDashboard = () => {
         <DashboardLayout activePath="/student-dashboard" studentName={applicantName} isEnrolled={info?.isEnrolled}>
 
             {/* Content area — no extra overlay, bg photo shows through */}
-            <div style={{ padding: '0 200px 48px', minHeight: '100%' }}>
+            <div style={{ padding: '0 24px 48px', minHeight: '100%', maxWidth: '750px', margin: '0 auto' }}>
 
                 {/* Page title — no background, text directly over photo */}
                 <div style={{
@@ -147,16 +147,16 @@ const StudentDashboard = () => {
                         <Field label="Middle Name"  value={info.middleName} />
                         <Field label="Last Name"    value={info.lastName} />
                     </Grid3>
-                    <div style={{ height: 14 }} />
+                    <div style={{ height: 10 }} />
                     <Grid2>
                         <Field label="Date of Birth" value={info.dob} />
                         <Field label="Religion"      value={info.religion} />
                     </Grid2>
-                    <div style={{ height: 14 }} />
+                    <div style={{ height: 10 }} />
                     <Field label="Gender" value={info.gender} />
                 </Card>
 
-                <div style={{ height: 22 }} />
+                <div style={{ height: 16 }} />
 
                 {/* ── Contact Info ── */}
                 <SectionLabel>Student Contact Information</SectionLabel>
@@ -167,7 +167,7 @@ const StudentDashboard = () => {
                     </Grid2>
                 </Card>
 
-                <div style={{ height: 22 }} />
+                <div style={{ height: 16 }} />
 
                 {/* ── Guardian Info ── */}
                 <SectionLabel>Guardian Information</SectionLabel>
@@ -177,14 +177,14 @@ const StudentDashboard = () => {
                         <Field label="Middle Name" value={info.guardianMiddleName} />
                         <Field label="Last Name"   value={info.guardianLastName} />
                     </Grid3>
-                    <div style={{ height: 14 }} />
+                    <div style={{ height: 10 }} />
                     <Grid2>
                         <Field label="Date of Birth" value={info.guardianDob} />
                         <Field label="Occupation"    value={info.guardianOccupation} />
                     </Grid2>
                 </Card>
 
-                <div style={{ height: 22 }} />
+                <div style={{ height: 16 }} />
 
                 {/* ── Educational Background ── */}
                 <SectionLabel>User Educational Background (For Transferees Only)</SectionLabel>
@@ -193,12 +193,12 @@ const StudentDashboard = () => {
                         <Field label="Previous School Attended"    value={info.prevSchool} />
                         <Field label="Address of Previous School"  value={info.schoolAddress} />
                     </Grid2>
-                    <div style={{ height: 14 }} />
+                    <div style={{ height: 10 }} />
                     <Grid2>
                         <Field label="Previous Grade Level"          value={info.prevGrade} />
                         <Field label="Previous School Year Attended" value={info.schoolYear} />
                     </Grid2>
-                    <div style={{ height: 14 }} />
+                    <div style={{ height: 10 }} />
                     <Grid2>
                         <Field label="Previous Strand/Course Taken" value={info.strandCourse} />
                         <Field label="Previous Program Taken"       value={info.prevProgram} />

@@ -61,7 +61,7 @@ const EnrollTo = () => {
                     });
                     setIsEnrolled(true);
                     setHasEnrollmentRecord(true);
-                    setMessage('You are already enrolled for this term.');
+                    setMessage('You have already submitted your enrollment details for this term.');
                 } else {
                     // Set defaults from system settings if not enrolled
                     setFormData(prev => ({
