@@ -61,7 +61,7 @@ const AdminDashboard = () => {
                 const dataSettings = await resSettings.json();
 
                 const activeAY = dataSettings.academic_year || dataSettings.current_academic_year || '';
-                const activeSem = dataSettings.semester || dataSettings.current_semester || '1st';
+                const activeSem = dataSettings.semester || dataSettings.current_semester || '1st Semester';
 
                 setSettings({
                     academic_year: activeAY,

@@ -196,7 +196,6 @@ const AdminVerify = () => {
                             <button
                                 style={s.saveBtn}
                                 onClick={() => handleAction('save_receipt')}
-                                disabled={!data.payment?.reference_number}
                             >
                                 💾 SAVE & VERIFY PAYMENT
                             </button>

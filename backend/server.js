@@ -211,7 +211,7 @@ const initStudentAssets = () => {
             db.query("SELECT COUNT(*) AS count FROM system_settings", (countErr, rows) => {
                 if (!countErr && rows[0]?.count === 0) {
                     const currentYear = new Date().getFullYear();
-                    db.query("INSERT INTO system_settings (id, academic_year, semester, enrollment_status) VALUES (1, ?, '1st', 'Open')", [`${currentYear}-${currentYear + 1}`]);
+                    db.query("INSERT INTO system_settings (id, academic_year, semester, enrollment_status) VALUES (1, ?, '1st Semester', 'Open')", [`${currentYear}-${currentYear + 1}`]);
                 }
             });
         }
