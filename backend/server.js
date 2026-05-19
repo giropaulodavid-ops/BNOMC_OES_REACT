@@ -699,18 +699,28 @@ app.post('/api/admin/verify-documents/:id', (req, res) => {
     db.query(sql, [studentId, status, notes, status, notes], (err) => {
         if (err) return res.status(500).json({ error: err.message });
 
-        // If documents are rejected, notify the student via email
-        if (status === 'Rejected') {
-            const studentSql = `SELECT first_name, last_name, email_address FROM students WHERE student_id = ?`;
-            db.query(studentSql, [studentId], (studentErr, studentRows) => {
-                if (studentErr || !studentRows.length) {
-                    console.error("❌ Failed to query student for rejection email:", studentErr ? studentErr.message : "Student not found");
+        // Fetch student's name to log and use for email notifications
+        const studentSql = `SELECT first_name, last_name, email_address FROM students WHERE student_id = ?`;
+        db.query(studentSql, [studentId], (studentErr, studentRows) => {
+            let studentName = `Student ID: ${studentId}`;
+            let studentEmail = '';
+            if (!studentErr && studentRows.length) {
+                studentName = `${studentRows[0].first_name} ${studentRows[0].last_name}`;
+                studentEmail = studentRows[0].email_address;
+            }
+
+            // 1. Log to admin_activity_log so it shows up in "Recent Activity"
+            const logSql = "INSERT INTO admin_activity_log (student_id, activity_text, created_at) VALUES (?, ?, NOW())";
+            const logText = `Admin updated document status to ${status} for Student ID: ${studentId}`;
+            db.query(logSql, [studentId, logText], (logErr) => {
+                if (logErr) console.error("❌ Failed to log admin document verification activity:", logErr.message);
+            });
+
+            // 2. Perform conditional actions
+            if (status === 'Rejected') {
+                if (!studentEmail) {
                     return res.json({ success: true, message: "Document status updated! (Failed to fetch student email)" });
                 }
-
-                const student = studentRows[0];
-                const studentName = `${student.first_name} ${student.last_name}`;
-                const studentEmail = student.email_address;
 
                 const mailOptions = {
                     from: '"BNOMC Enrollment System" <giropaulo.david@unc.edu.ph>',
@@ -756,13 +766,13 @@ app.post('/api/admin/verify-documents/:id', (req, res) => {
                     console.log("✅ Rejection notification email sent to:", studentEmail);
                     res.json({ success: true, message: "Document status updated and student notified via email!" });
                 });
-            });
-        } else {
-            if (status === 'Verified') {
-                checkAndSendEnrollmentEmail(studentId);
+            } else {
+                if (status === 'Verified') {
+                    checkAndSendEnrollmentEmail(studentId);
+                }
+                res.json({ success: true, message: "Document status updated!" });
             }
-            res.json({ success: true, message: "Document status updated!" });
-        }
+        });
     });
 });
 
@@ -792,6 +802,14 @@ app.post('/api/admin/verify-documents/:id', (req, res) => {
                 return db.query(insertSql, [studentId, official_receipt.trim(), semester, academic_year], (insErr) => {
                     if (insErr) return res.status(500).json({ error: insErr.message });
                     checkAndSendEnrollmentEmail(studentId);
+
+                    // Log to admin_activity_log so it shows up in "Recent Activity"
+                    const adminLogSql = `INSERT INTO admin_activity_log (student_id, activity_text, created_at) VALUES (?, ?, NOW())`;
+                    const adminLogText = `Admin verified payment (OR: ${official_receipt.trim()}) for Student ID: ${studentId}`;
+                    db.query(adminLogSql, [studentId, adminLogText], (logErr) => {
+                        if (logErr) console.error("Admin Log Error (Non-critical):", logErr.message);
+                    });
+
                     res.json({ success: true, message: "New payment record created for this term!" });
                 });
             }
@@ -803,6 +821,14 @@ app.post('/api/admin/verify-documents/:id', (req, res) => {
             db.query(updateSql, [official_receipt.trim(), paymentId], (err) => {
                 if (err) return res.status(500).json({ error: err.message });
                 checkAndSendEnrollmentEmail(studentId);
+
+                // Log to admin_activity_log so it shows up in "Recent Activity"
+                const adminLogSql = `INSERT INTO admin_activity_log (student_id, activity_text, created_at) VALUES (?, ?, NOW())`;
+                const adminLogText = `Admin verified payment (OR: ${official_receipt.trim()}) for Student ID: ${studentId}`;
+                db.query(adminLogSql, [studentId, adminLogText], (logErr) => {
+                    if (logErr) console.error("Admin Log Error (Non-critical):", logErr.message);
+                });
+
                 res.json({ success: true, message: "Payment verified for the selected term!" });
             });
         });
@@ -839,7 +865,15 @@ app.get('/api/admin/students', (req, res) => {
         INNER JOIN (${enrollmentSubquery}) latest_e ON s.student_id = latest_e.student_id
         INNER JOIN enrollments e ON e.id = latest_e.latest_id
         LEFT JOIN document_verifications dv ON s.student_id = dv.student_id
-        LEFT JOIN payment_references pr ON s.student_id = pr.student_id 
+        LEFT JOIN (
+            SELECT pr1.* 
+            FROM payment_references pr1
+            INNER JOIN (
+                SELECT student_id, semester, academic_year, MAX(id) AS max_id
+                FROM payment_references
+                GROUP BY student_id, semester, academic_year
+            ) pr2 ON pr1.id = pr2.max_id
+        ) pr ON s.student_id = pr.student_id 
             AND pr.semester = e.semester 
             AND pr.academic_year = e.academic_year
         ORDER BY e.created_at DESC
@@ -859,34 +893,61 @@ app.get('/api/admin/students', (req, res) => {
 
     // Get statistics for the dashboard cards
 app.get('/api/admin/stats', (req, res) => {
-    const { academic_year, semester } = req.query;
+    let { academic_year, semester } = req.query;
 
-    // Base queries that link to the specific enrollment period
-    const totalApplicantsSql = `SELECT COUNT(*) as count FROM enrollments WHERE academic_year = ? AND semester = ?`;
-    
-    const totalEnrolleesSql = `
-        SELECT COUNT(*) as count 
-        FROM payment_references 
-        WHERE status = 'Verified' AND academic_year = ? AND semester = ?`;
+    const getStats = (ay, sem) => {
+        // Total unique students enrolled for this specific term
+        const totalApplicantsSql = `SELECT COUNT(DISTINCT student_id) as count FROM enrollments WHERE academic_year = ? AND semester = ?`;
+        
+        // Total unique students who are verified for BOTH documents AND payment in this specific term
+        const totalEnrolleesSql = `
+            SELECT COUNT(DISTINCT e.student_id) as count 
+            FROM enrollments e
+            JOIN document_verifications dv ON e.student_id = dv.student_id
+            JOIN payment_references pr ON e.student_id = pr.student_id 
+                AND pr.academic_year = e.academic_year 
+                AND pr.semester = e.semester
+            WHERE dv.doc_status = 'Verified' 
+              AND pr.status = 'Verified' 
+              AND e.academic_year = ? 
+              AND e.semester = ?`;
 
-    const pendingVerificationsSql = `
-        SELECT COUNT(*) as count 
-        FROM payment_references 
-        WHERE status = 'Pending' AND academic_year = ? AND semester = ?`;
+        // Total unique students enrolled in this term who are NOT yet fully verified (either documents or payment is not verified)
+        const pendingVerificationsSql = `
+            SELECT COUNT(DISTINCT e.student_id) as count 
+            FROM enrollments e
+            LEFT JOIN document_verifications dv ON e.student_id = dv.student_id
+            LEFT JOIN payment_references pr ON e.student_id = pr.student_id 
+                AND pr.academic_year = e.academic_year 
+                AND pr.semester = e.semester
+            WHERE (dv.doc_status IS NULL OR dv.doc_status != 'Verified' OR pr.status IS NULL OR pr.status != 'Verified')
+              AND e.academic_year = ? 
+              AND e.semester = ?`;
 
-    // Execute all three queries in parallel
-    Promise.all([
-        new Promise((resolve, reject) => db.query(totalApplicantsSql, [academic_year, semester], (err, r) => err ? reject(err) : resolve(r[0].count))),
-        new Promise((resolve, reject) => db.query(totalEnrolleesSql, [academic_year, semester], (err, r) => err ? reject(err) : resolve(r[0].count))),
-        new Promise((resolve, reject) => db.query(pendingVerificationsSql, [academic_year, semester], (err, r) => err ? reject(err) : resolve(r[0].count)))
-    ])
-    .then(([total, enrollees, pending]) => {
-        res.json({ total, enrollees, pending });
-    })
-    .catch(err => {
-        console.error("Stats Error:", err.message);
-        res.status(500).json({ error: err.message });
-    });
+        Promise.all([
+            new Promise((resolve, reject) => db.query(totalApplicantsSql, [ay, sem], (err, r) => err ? reject(err) : resolve(r[0].count))),
+            new Promise((resolve, reject) => db.query(totalEnrolleesSql, [ay, sem], (err, r) => err ? reject(err) : resolve(r[0].count))),
+            new Promise((resolve, reject) => db.query(pendingVerificationsSql, [ay, sem], (err, r) => err ? reject(err) : resolve(r[0].count)))
+        ])
+        .then(([total, enrollees, pending]) => {
+            res.json({ total, enrollees, pending });
+        })
+        .catch(err => {
+            console.error("Stats Error:", err.message);
+            res.status(500).json({ error: err.message });
+        });
+    };
+
+    if (!academic_year || !semester) {
+        db.query("SELECT academic_year, semester FROM system_settings WHERE id = 1", (err, settings) => {
+            if (err || !settings.length) {
+                return res.status(500).json({ error: "Failed to fetch active term settings" });
+            }
+            getStats(settings[0].academic_year, settings[0].semester);
+        });
+    } else {
+        getStats(academic_year, semester);
+    }
 });
 
     app.post('/api/admin/update-verification', (req, res) => {
@@ -1036,10 +1097,17 @@ function finishRequest(res, studentId, orNumber) {
     db.query(logSql, [logMessage], (logErr) => {
         if (logErr) console.error("Log Error (Non-critical):", logErr.message);
         
-        // Always return success if the payment was saved, even if logging fails
-        res.json({ 
-            success: true, 
-            message: "OR Number saved and student verified!" 
+        // Also log to admin_activity_log so it shows up in "Recent Activity" on the dashboard
+        const adminLogSql = `INSERT INTO admin_activity_log (student_id, activity_text, created_at) VALUES (?, ?, NOW())`;
+        const adminLogText = `Admin verified payment (OR: ${orNumber}) for Student ID: ${studentId}`;
+        
+        db.query(adminLogSql, [studentId, adminLogText], (adminLogErr) => {
+            if (adminLogErr) console.error("Admin Log Error (Non-critical):", adminLogErr.message);
+            
+            res.json({ 
+                success: true, 
+                message: "OR Number saved and student verified!" 
+            });
         });
     });
 }
@@ -1077,7 +1145,15 @@ app.get('/api/admin/submissions', (req, res) => {
             END as enrollment_status
         FROM students s
         LEFT JOIN document_verifications dv ON s.student_id = dv.student_id
-        LEFT JOIN payment_references pr ON s.student_id = pr.student_id
+        LEFT JOIN (
+            SELECT pr1.* 
+            FROM payment_references pr1
+            INNER JOIN (
+                SELECT student_id, semester, academic_year, MAX(id) AS max_id
+                FROM payment_references
+                GROUP BY student_id, semester, academic_year
+            ) pr2 ON pr1.id = pr2.max_id
+        ) pr ON s.student_id = pr.student_id
     `;
     
     db.query(sql, (err, results) => {
