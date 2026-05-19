@@ -41,6 +41,8 @@ const Documents = () => {
   const [isEnrolled, setIsEnrolled] = useState(false);
   const [hasEnrollment, setHasEnrollment] = useState(false);
   const [requiredDocuments, setRequiredDocuments] = useState([]);
+  const [docStatus, setDocStatus] = useState('Pending');
+  const [adminNotes, setAdminNotes] = useState('');
 
   // Extract grade number from year level
   const extractGrade = (yearLevel) => {
@@ -116,6 +118,11 @@ useEffect(() => {
           // 4. CHECK IF DOCUMENTS ARE ALREADY SUBMITTED (Read-Only Logic)
           try {
             const documentsRes = await axios.get(`http://127.0.0.1:5000/api/student/${studentId}/documents`);
+            const docStat = documentsRes.data.docStatus || 'Pending';
+            const adminNote = documentsRes.data.adminNotes || '';
+            
+            setDocStatus(docStat);
+            setAdminNotes(adminNote);
             
             if (documentsRes.data.isSubmitted) {
               const savedData = documentsRes.data.data;
@@ -133,7 +140,22 @@ useEffect(() => {
               setMessage('You have already submitted your documents.');
               console.log('✅ Documents found: Form set to Read-Only');
             } else {
-              console.log('ℹ️ No previous documents found: Form is editable');
+              if (docStat === 'Rejected') {
+                const savedData = documentsRes.data.data || {};
+                setSubmittedFiles({
+                  psa_birth_certificate: savedData.psa_birth_certificate || '',
+                  recent_picture: savedData.recent_picture || '',
+                  report_card: savedData.report_card || '',
+                  good_moral: savedData.good_moral || '',
+                  esc_voucher: savedData.esc_voucher || '',
+                  honorable_dismissal: savedData.honorable_dismissal || '',
+                });
+                setIsSubmitted(false); // Enable form editing
+                setMessage('Your previous document submission was rejected. Please re-upload.');
+                console.log('ℹ️ Documents rejected: Form is editable for re-upload');
+              } else {
+                console.log('ℹ️ No previous documents found: Form is editable');
+              }
             }
           } catch (docErr) {
             console.warn('Error fetching document submission status:', docErr.message);
@@ -164,9 +186,9 @@ useEffect(() => {
 const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Validate requirements
+    // Validate requirements: a document is required if it is neither chosen newly nor already submitted
     for (const field of requiredDocuments) {
-        if (!formData[field]) {
+        if (!formData[field] && !submittedFiles[field]) {
             setMessage(`Please upload your ${field.replace(/_/g, ' ')}.`);
             return;
         }
@@ -189,7 +211,23 @@ const handleSubmit = async (e) => {
         );
 
         setMessage('Documents submitted successfully!');
+        setDocStatus('Pending');
+        setAdminNotes('');
         setIsSubmitted(true);
+        
+        // Refresh the file display after submitting
+        const documentsRes = await axios.get(`http://127.0.0.1:5000/api/student/${studentId}/documents`);
+        if (documentsRes.data.isSubmitted) {
+            const savedData = documentsRes.data.data;
+            setSubmittedFiles({
+                psa_birth_certificate: savedData.psa_birth_certificate || '',
+                recent_picture: savedData.recent_picture || '',
+                report_card: savedData.report_card || '',
+                good_moral: savedData.good_moral || '',
+                esc_voucher: savedData.esc_voucher || '',
+                honorable_dismissal: savedData.honorable_dismissal || '',
+            });
+        }
     } catch (err) {
         console.error(err);
         setMessage('Error uploading files. Please try again.');
@@ -337,6 +375,29 @@ const handleSubmit = async (e) => {
         </div>
 
         <div style={cardStyle}>
+          {docStatus === 'Rejected' && (
+            <div style={{
+              background: '#f8d7da',
+              color: '#721c24',
+              padding: '16px 20px',
+              borderRadius: '10px',
+              border: '1px solid #f5c6cb',
+              marginBottom: '24px',
+              fontWeight: 600,
+              fontFamily: 'Montserrat, sans-serif'
+            }}>
+              <h4 style={{ margin: '0 0 8px 0', fontSize: '1.05rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                ⚠️ DOCUMENT VERIFICATION REJECTED
+              </h4>
+              <p style={{ margin: '0 0 12px 0', fontSize: '0.85rem', lineHeight: '1.4' }}>
+                Your submitted documents were not approved by the admissions officer. Please read the comments below, upload the corrected documents, and submit again.
+              </p>
+              <div style={{ background: 'rgba(255, 255, 255, 0.55)', padding: '12px 16px', borderRadius: '8px', borderLeft: '4px solid #721c24', fontStyle: 'italic', color: '#721c24', fontSize: '0.9rem' }}>
+                "{adminNotes || 'No comments provided by administrator.'}"
+              </div>
+            </div>
+          )}
+
           {message && (
             <p style={successMessageStyle}>
               {message}
@@ -372,7 +433,7 @@ const handleSubmit = async (e) => {
                       Choose File
                     </button>
                     <span style={fileNameStyle}>
-                      {submittedFiles.psa_birth_certificate || fileNames.psa_birth_certificate}
+                      {formData.psa_birth_certificate ? fileNames.psa_birth_certificate : (submittedFiles.psa_birth_certificate || 'No file chosen')}
                     </span>
                     <input
                       type="file"
@@ -410,7 +471,7 @@ const handleSubmit = async (e) => {
                       Choose File
                     </button>
                     <span style={fileNameStyle}>
-                      {submittedFiles.recent_picture || fileNames.recent_picture}
+                      {formData.recent_picture ? fileNames.recent_picture : (submittedFiles.recent_picture || 'No file chosen')}
                     </span>
                     <input
                       type="file"
@@ -445,7 +506,7 @@ const handleSubmit = async (e) => {
                       Choose File
                     </button>
                     <span style={fileNameStyle}>
-                      {submittedFiles.report_card || fileNames.report_card}
+                      {formData.report_card ? fileNames.report_card : (submittedFiles.report_card || 'No file chosen')}
                     </span>
                     <input
                       type="file"
@@ -481,7 +542,7 @@ const handleSubmit = async (e) => {
                       Choose File
                     </button>
                     <span style={fileNameStyle}>
-                      {submittedFiles.good_moral || fileNames.good_moral}
+                      {formData.good_moral ? fileNames.good_moral : (submittedFiles.good_moral || 'No file chosen')}
                     </span>
                     <input
                       type="file"
@@ -519,7 +580,7 @@ const handleSubmit = async (e) => {
                       Choose File
                     </button>
                     <span style={fileNameStyle}>
-                      {submittedFiles.esc_voucher || fileNames.esc_voucher}
+                      {formData.esc_voucher ? fileNames.esc_voucher : (submittedFiles.esc_voucher || 'No file chosen')}
                     </span>
                     <input
                       type="file"
@@ -555,7 +616,7 @@ const handleSubmit = async (e) => {
                       Choose File
                     </button>
                     <span style={fileNameStyle}>
-                      {submittedFiles.honorable_dismissal || fileNames.honorable_dismissal}
+                      {formData.honorable_dismissal ? fileNames.honorable_dismissal : (submittedFiles.honorable_dismissal || 'No file chosen')}
                     </span>
                     <input
                       type="file"

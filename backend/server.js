@@ -225,6 +225,24 @@ const initStudentAssets = () => {
     db.query(createDocVerificationsTable, (err) => {
         if (err) console.error("❌ Failed to create document_verifications table:", err.message);
     });
+
+    // Ensure enrollment_email_sent column exists in enrollments
+    const checkColumnSql = `
+        SELECT COLUMN_NAME 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = 'bnomc_oes_db' 
+          AND TABLE_NAME = 'enrollments' 
+          AND COLUMN_NAME = 'enrollment_email_sent'
+    `;
+    db.query(checkColumnSql, (colErr, colRows) => {
+        if (!colErr && colRows.length === 0) {
+            const addColumnSql = "ALTER TABLE enrollments ADD COLUMN enrollment_email_sent TINYINT(1) DEFAULT 0";
+            db.query(addColumnSql, (alterErr) => {
+                if (alterErr) console.error("❌ Failed to add enrollment_email_sent column:", alterErr.message);
+                else console.log("✅ Successfully added enrollment_email_sent column to enrollments table");
+            });
+        }
+    });
     db.query(createDocumentsTable, (err) => {
         if (err) console.error("❌ Failed to create document_submissions table:", err.message);
     });
@@ -541,6 +559,132 @@ app.post('/api/admin/update-settings', (req, res) => {
     });
 });
 
+// Function to check if a student has verified documents and verified payment, and send confirmation email.
+function checkAndSendEnrollmentEmail(studentId) {
+    db.query("SELECT academic_year, semester FROM system_settings WHERE id = 1", (err, settings) => {
+        if (err || !settings.length) {
+            console.error("❌ Failed to retrieve system settings for enrollment email:", err ? err.message : "No settings found");
+            return;
+        }
+
+        const activeAY = settings[0].academic_year;
+        const activeSem = settings[0].semester;
+
+        const sql = `
+            SELECT 
+                s.first_name, 
+                s.last_name, 
+                s.email_address,
+                e.educational_level,
+                e.strand,
+                e.year_level,
+                e.academic_year,
+                e.semester,
+                e.enrollment_email_sent,
+                dv.doc_status,
+                pr.status AS pay_status
+            FROM enrollments e
+            JOIN students s ON e.student_id = s.student_id
+            LEFT JOIN document_verifications dv ON e.student_id = dv.student_id
+            LEFT JOIN payment_references pr ON e.student_id = pr.student_id 
+                AND pr.academic_year = e.academic_year 
+                AND pr.semester = e.semester
+            WHERE e.student_id = ?
+              AND e.academic_year = ?
+              AND e.semester = ?
+        `;
+
+        db.query(sql, [studentId, activeAY, activeSem], (queryErr, rows) => {
+            if (queryErr || !rows.length) {
+                console.error("❌ Failed to query student enrollment status for email:", queryErr ? queryErr.message : "No enrollment record found");
+                return;
+            }
+
+            const record = rows[0];
+            const docStatus = record.doc_status || 'Pending';
+            const payStatus = record.pay_status || 'Pending';
+            const emailSent = record.enrollment_email_sent || 0;
+
+            console.log(`[Email Check] Student ID: ${studentId}, doc_status: ${docStatus}, pay_status: ${payStatus}, emailSent: ${emailSent}`);
+
+            if (docStatus === 'Verified' && payStatus === 'Verified' && emailSent === 0) {
+                const updateSentSql = `
+                    UPDATE enrollments 
+                    SET enrollment_email_sent = 1 
+                    WHERE student_id = ? AND academic_year = ? AND semester = ?
+                `;
+                db.query(updateSentSql, [studentId, activeAY, activeSem], (updateErr) => {
+                    if (updateErr) {
+                        console.error("❌ Failed to update enrollment_email_sent flag:", updateErr.message);
+                        return;
+                    }
+
+                    const studentName = `${record.first_name} ${record.last_name}`;
+                    const studentEmail = record.email_address;
+                    
+                    const details = [];
+                    if (record.educational_level) details.push(`<strong>Education Level:</strong> ${record.educational_level}`);
+                    if (record.year_level) details.push(`<strong>Year / Grade Level:</strong> ${record.year_level}`);
+                    if (record.strand) details.push(`<strong>Strand:</strong> ${record.strand}`);
+                    details.push(`<strong>School Year:</strong> ${record.academic_year}`);
+                    details.push(`<strong>Semester:</strong> ${record.semester}`);
+
+                    const mailOptions = {
+                        from: '"BNOMC Admissions" <giropaulo.david@unc.edu.ph>',
+                        to: studentEmail,
+                        subject: 'Official Enrollment Confirmation - Blessed Name of Mary College',
+                        html: `
+                            <div style="font-family: Arial, sans-serif; background-color: #f7fafc; padding: 30px 15px; border-radius: 8px;">
+                                <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+                                    <div style="background-color: #0b4e94; color: #ffffff; padding: 24px; text-align: center; border-bottom: 5px solid #e6e94e;">
+                                        <h1 style="margin: 0; font-size: 20px; font-weight: bold; letter-spacing: 0.05em; text-transform: uppercase;">Blessed Name of Mary College, Inc.</h1>
+                                        <p style="margin: 4px 0 0 0; font-size: 11px; opacity: 0.85; letter-spacing: 0.15em; text-transform: uppercase;">San Isidro Pili, Camarines Sur</p>
+                                    </div>
+                                    
+                                    <div style="padding: 30px; color: #2d3748; line-height: 1.8; font-size: 16px;">
+                                        <h2 style="color: #2b6cb0; margin-top: 0; font-size: 22px; font-weight: bold; text-align: center; margin-bottom: 20px;">🎉 Congratulations, You are Officially Enrolled!</h2>
+                                        
+                                        <p>Dear <strong>${studentName}</strong>,</p>
+                                        
+                                        <p>We are delighted to inform you that your registration documents and payment have been successfully verified by our admissions office. You are now <strong>officially enrolled</strong> for this term!</p>
+                                        
+                                        <div style="background-color: #ebf8ff; border-left: 4px solid #3182ce; padding: 20px; border-radius: 0 8px 8px 0; margin: 24px 0; font-size: 15px;">
+                                            <h3 style="margin-top: 0; margin-bottom: 12px; font-size: 16px; color: #2b6cb0; text-transform: uppercase;">Enrollment Information</h3>
+                                            <div style="display: grid; gap: 6px;">
+                                                ${details.map(d => `<div style="margin-bottom: 4px;">${d}</div>`).join('')}
+                                            </div>
+                                        </div>
+
+                                        <p>Welcome to Blessed Name of Mary College! We look forward to supporting you on your educational journey and helping you achieve your aspirations.</p>
+                                        
+                                        <div style="text-align: center; margin: 30px 0;">
+                                            <a href="http://localhost:3000/login" style="background-color: #0b4e94; color: #ffffff; padding: 12px 28px; text-decoration: none; font-weight: bold; border-radius: 6px; display: inline-block; box-shadow: 0 4px 6px rgba(11, 78, 148, 0.2);">
+                                                Go to Student Portal
+                                            </a>
+                                        </div>
+
+                                        <p style="font-size: 14px; color: #718096; margin-top: 30px; border-top: 1px solid #edf2f7; padding-top: 15px;">
+                                            If you have any questions or require class schedules and services, feel free to contact the registrar's desk.<br><br>
+                                            Sincerely,<br>
+                                            <strong>Admissions & Registrar's Office</strong><br>
+                                            Blessed Name of Mary College, Inc.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        `
+                    };
+
+                    transporter.sendMail(mailOptions, (mailErr, info) => {
+                        if (mailErr) console.error("❌ Enrollment email failed:", mailErr.message);
+                        else console.log(`✅ Enrollment confirmation email sent to: ${studentEmail}`);
+                    });
+                });
+            }
+        });
+    });
+}
+
 // 1. Route to save Document Verification
 app.post('/api/admin/verify-documents/:id', (req, res) => {
     const studentId = req.params.id;
@@ -554,7 +698,71 @@ app.post('/api/admin/verify-documents/:id', (req, res) => {
 
     db.query(sql, [studentId, status, notes, status, notes], (err) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true, message: "Document status updated!" });
+
+        // If documents are rejected, notify the student via email
+        if (status === 'Rejected') {
+            const studentSql = `SELECT first_name, last_name, email_address FROM students WHERE student_id = ?`;
+            db.query(studentSql, [studentId], (studentErr, studentRows) => {
+                if (studentErr || !studentRows.length) {
+                    console.error("❌ Failed to query student for rejection email:", studentErr ? studentErr.message : "Student not found");
+                    return res.json({ success: true, message: "Document status updated! (Failed to fetch student email)" });
+                }
+
+                const student = studentRows[0];
+                const studentName = `${student.first_name} ${student.last_name}`;
+                const studentEmail = student.email_address;
+
+                const mailOptions = {
+                    from: '"BNOMC Enrollment System" <giropaulo.david@unc.edu.ph>',
+                    to: studentEmail,
+                    subject: 'Document Verification Rejected - BNOMC',
+                    html: `
+                        <div style="font-family: Arial, sans-serif; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; max-width: 600px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+                            <div style="background-color: #c0392b; color: #fff; padding: 20px; border-radius: 12px 12px 0 0; text-align: center;">
+                                <h2 style="margin: 0; font-size: 1.6rem; font-family: Arial, sans-serif; font-weight: bold;">Document Verification Alert</h2>
+                            </div>
+                            <div style="padding: 24px; color: #2d3748; line-height: 1.7; font-size: 16px;">
+                                <p>Dear <strong>${studentName}</strong>,</p>
+                                <p>This is to inform you that your submitted enrollment documents for the Blessed Name of Mary College Online Enrollment System have been reviewed and <strong>rejected</strong> by the admissions office.</p>
+                                
+                                <p style="font-weight: bold; color: #c0392b; margin-top: 20px; margin-bottom: 8px;">Reason / Administrator Comments:</p>
+                                <div style="background-color: #fffaf0; border-left: 4px solid #dd6b20; padding: 18px; margin: 10px 0 20px; font-style: italic; border-radius: 0 8px 8px 0; color: #7b341e; font-size: 15px;">
+                                    "${notes || 'No comments provided by administrator.'}"
+                                </div>
+
+                                <p>To proceed with your enrollment, please log in to the student portal and re-upload the correct/clearer documents as requested.</p>
+                                
+                                <div style="text-align: center; margin: 30px 0;">
+                                    <a href="http://localhost:3000/login" style="background-color: #0B4E94; color: #fff; padding: 14px 28px; text-decoration: none; font-weight: bold; border-radius: 6px; display: inline-block; box-shadow: 0 4px 6px rgba(11, 78, 148, 0.2); transition: all 0.2s;">
+                                        Access Student Portal
+                                    </a>
+                                </div>
+
+                                <p style="font-size: 14px; color: #718096; margin-top: 30px; border-top: 1px solid #edf2f7; padding-top: 15px;">
+                                    If you have any questions or require further assistance, please contact the admissions desk.<br><br>
+                                    Sincerely,<br>
+                                    <strong>Blessed Name of Mary College, Inc.</strong>
+                                </p>
+                            </div>
+                        </div>
+                    `
+                };
+
+                transporter.sendMail(mailOptions, (mailErr, info) => {
+                    if (mailErr) {
+                        console.error("❌ Rejection email failed to send:", mailErr);
+                        return res.json({ success: true, message: "Document status updated, but email notification failed." });
+                    }
+                    console.log("✅ Rejection notification email sent to:", studentEmail);
+                    res.json({ success: true, message: "Document status updated and student notified via email!" });
+                });
+            });
+        } else {
+            if (status === 'Verified') {
+                checkAndSendEnrollmentEmail(studentId);
+            }
+            res.json({ success: true, message: "Document status updated!" });
+        }
     });
 });
 
@@ -583,6 +791,7 @@ app.post('/api/admin/verify-documents/:id', (req, res) => {
                 `;
                 return db.query(insertSql, [studentId, official_receipt.trim(), semester, academic_year], (insErr) => {
                     if (insErr) return res.status(500).json({ error: insErr.message });
+                    checkAndSendEnrollmentEmail(studentId);
                     res.json({ success: true, message: "New payment record created for this term!" });
                 });
             }
@@ -593,6 +802,7 @@ app.post('/api/admin/verify-documents/:id', (req, res) => {
             
             db.query(updateSql, [official_receipt.trim(), paymentId], (err) => {
                 if (err) return res.status(500).json({ error: err.message });
+                checkAndSendEnrollmentEmail(studentId);
                 res.json({ success: true, message: "Payment verified for the selected term!" });
             });
         });
@@ -686,6 +896,10 @@ app.get('/api/admin/stats', (req, res) => {
         const updateSql = "UPDATE document_verifications SET doc_status = ? WHERE student_id = ?";
         db.query(updateSql, [doc_status_update, studentId], (err) => {
             if (err) return res.status(500).json(err);
+
+            if (doc_status_update === 'Verified') {
+                checkAndSendEnrollmentEmail(studentId);
+            }
 
             // 2. THE FIX: Explicitly log this action so it appears in the sidebar
             const logSql = "INSERT INTO admin_activity_log (activity_text, created_at) VALUES (?, NOW())";
@@ -802,9 +1016,11 @@ app.post('/api/admin/save-receipt/:id', (req, res) => {
             `;
             db.query(insertSql, [studentId, orNumber, semester, academic_year], (insErr) => {
                 if (insErr) return res.status(500).json({ error: insErr.message });
+                checkAndSendEnrollmentEmail(studentId);
                 finishRequest(res, studentId, orNumber);
             });
         } else {
+            checkAndSendEnrollmentEmail(studentId);
             finishRequest(res, studentId, orNumber);
         }
     });
@@ -1050,25 +1266,42 @@ app.get('/api/student/:id/documents', (req, res) => {
         LIMIT 1
     `;
 
+    const verSql = `SELECT doc_status, admin_notes FROM document_verifications WHERE student_id = ?`;
+
     db.query(sql, [studentId], (err, results) => {
         if (err) {
             console.error("❌ Database Error:", err.message);
             return res.status(500).json({ error: "Database error" });
         }
 
-        if (results.length > 0) {
-            // If a record exists, send the data and set isSubmitted to true
-            res.json({
-                isSubmitted: true,
-                data: results[0]
-            });
-        } else {
-            // If no record exists, tell the frontend it's okay to upload
-            res.json({
-                isSubmitted: false,
-                data: null
-            });
-        }
+        db.query(verSql, [studentId], (verErr, verResults) => {
+            if (verErr) {
+                console.error("❌ Database Error:", verErr.message);
+                return res.status(500).json({ error: "Database error" });
+            }
+
+            const verification = verResults[0] || { doc_status: 'Pending', admin_notes: '' };
+            const docStatus = verification.doc_status;
+            const adminNotes = verification.admin_notes;
+
+            if (results.length > 0) {
+                // If documents are rejected, we set isSubmitted to false to allow re-uploading
+                const isRejected = docStatus === 'Rejected';
+                res.json({
+                    isSubmitted: !isRejected,
+                    data: results[0],
+                    docStatus: docStatus,
+                    adminNotes: adminNotes
+                });
+            } else {
+                res.json({
+                    isSubmitted: false,
+                    data: null,
+                    docStatus: docStatus,
+                    adminNotes: adminNotes
+                });
+            }
+        });
     });
 });
 
@@ -1224,6 +1457,9 @@ app.post('/api/admin/student/:id/documents', (req, res) => {
     db.query(updateSql, [status, studentId], (err, result) => {
         if (err) return res.status(500).json({ error: 'Database error' });
         if (result.affectedRows === 0) return res.status(404).json({ error: 'No document submission found' });
+        if (status === 'Verified') {
+            checkAndSendEnrollmentEmail(studentId);
+        }
         res.json({ success: true });
     });
 });
@@ -1240,6 +1476,9 @@ app.post('/api/admin/student/:id/payment', (req, res) => {
     db.query(updateSql, [status, studentId], (err, result) => {
         if (err) return res.status(500).json({ error: 'Database error' });
         if (result.affectedRows === 0) return res.status(404).json({ error: 'No payment record found' });
+        if (status === 'Verified') {
+            checkAndSendEnrollmentEmail(studentId);
+        }
         res.json({ success: true });
     });
 });
@@ -1370,29 +1609,62 @@ app.post('/api/student/:id/documents-submit', upload.fields([
     const studentId = req.params.id;
     const files = req.files;
 
-    // Helper to get the path if file exists, else null
-    const getPath = (field) => (files[field] ? files[field][0].path.replace(/\\/g, '/') : null);
+    // Fetch the latest submission to reuse any files that were NOT re-uploaded
+    const selectSql = `
+        SELECT psa_birth_certificate, recent_picture, report_card, good_moral, esc_voucher, honorable_dismissal 
+        FROM document_submissions 
+        WHERE student_id = ? 
+        ORDER BY submitted_at DESC 
+        LIMIT 1
+    `;
 
-    const sql = `INSERT INTO document_submissions 
-                (student_id, psa_birth_certificate, recent_picture, report_card, good_moral, esc_voucher, honorable_dismissal) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)`;
-
-    const values = [
-        studentId,
-        getPath('psa_birth_certificate'),
-        getPath('recent_picture'),
-        getPath('report_card'),
-        getPath('good_moral'),
-        getPath('esc_voucher'),
-        getPath('honorable_dismissal')
-    ];
-
-    db.query(sql, values, (err) => {
-        if (err) {
-            console.error('❌ Upload Error:', err.message);
-            return res.status(500).json({ error: 'Failed to save document paths' });
+    db.query(selectSql, [studentId], (selectErr, selectRows) => {
+        if (selectErr) {
+            console.error('❌ Select Error:', selectErr.message);
+            return res.status(500).json({ error: 'Failed to retrieve previous documents' });
         }
-        res.json({ message: 'Files uploaded and paths saved successfully!' });
+
+        const prevDocs = selectRows[0] || {};
+
+        // Helper to get the path if file exists, else reuse the previous path
+        const getPath = (field) => {
+            if (files && files[field]) {
+                return files[field][0].path.replace(/\\/g, '/');
+            }
+            return prevDocs[field] || null;
+        };
+
+        const sql = `INSERT INTO document_submissions 
+                    (student_id, psa_birth_certificate, recent_picture, report_card, good_moral, esc_voucher, honorable_dismissal) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?)`;
+
+        const values = [
+            studentId,
+            getPath('psa_birth_certificate'),
+            getPath('recent_picture'),
+            getPath('report_card'),
+            getPath('good_moral'),
+            getPath('esc_voucher'),
+            getPath('honorable_dismissal')
+        ];
+
+        db.query(sql, values, (err) => {
+            if (err) {
+                console.error('❌ Upload Error:', err.message);
+                return res.status(500).json({ error: 'Failed to save document paths' });
+            }
+            
+            // Reset document verification status to Pending and clear admin notes
+            const resetSql = `
+                INSERT INTO document_verifications (student_id, doc_status, admin_notes, verified_at)
+                VALUES (?, 'Pending', '', NOW())
+                ON DUPLICATE KEY UPDATE doc_status = 'Pending', admin_notes = '', verified_at = NOW()
+            `;
+            db.query(resetSql, [studentId], (resetErr) => {
+                if (resetErr) console.error("❌ Reset doc verification status failed:", resetErr.message);
+                res.json({ success: true, message: 'Files uploaded and paths saved successfully!' });
+            });
+        });
     });
 });
 
@@ -1423,7 +1695,17 @@ app.post('/api/student/:id/documents-submit', (req, res) => {
             console.error(`❌ Document insert failed for id=${studentId}:`, err.message);
             return res.status(500).json({ error: 'Failed to save documents' });
         }
-        res.json({ success: true, message: 'Documents submitted successfully' });
+        
+        // Reset document verification status to Pending and clear admin notes
+        const resetSql = `
+            INSERT INTO document_verifications (student_id, doc_status, admin_notes, verified_at)
+            VALUES (?, 'Pending', '', NOW())
+            ON DUPLICATE KEY UPDATE doc_status = 'Pending', admin_notes = '', verified_at = NOW()
+        `;
+        db.query(resetSql, [studentId], (resetErr) => {
+            if (resetErr) console.error("❌ Reset doc verification status failed:", resetErr.message);
+            res.json({ success: true, message: 'Documents submitted successfully' });
+        });
     });
 });
 
