@@ -655,6 +655,10 @@ function checkAndSendEnrollmentEmail(studentId) {
                                             </div>
                                         </div>
 
+                                        <p style="background-color: #fffaf0; border-left: 4px solid #dd6b20; padding: 15px; border-radius: 0 8px 8px 0; margin: 20px 0; font-size: 15px; color: #7b341e;">
+                                            <strong>Important Notice:</strong> Please bring and submit the <strong>physical/hard copies</strong> of your submitted enrollment documents to the Registrar's Office as soon as possible to complete your physical filing and academic profiling.
+                                        </p>
+
                                         <p>Welcome to Blessed Name of Mary College! We look forward to supporting you on your educational journey and helping you achieve your aspirations.</p>
                                         
                                         <div style="text-align: center; margin: 30px 0;">
