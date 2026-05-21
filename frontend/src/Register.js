@@ -15,7 +15,7 @@ const Register = () => {
 
     const colors = {
         primary: '#1B63AD',
-        secondary: '#E8E657', 
+        secondary: '#E8E657',
         darkBlue: '#0B4E94',
         cardBlue: '#0B4E94',
     };
@@ -44,8 +44,9 @@ const Register = () => {
         <>
             <script src="https://cdn.tailwindcss.com"></script>
             <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;800;900&display=swap" rel="stylesheet" />
-            
-            <style dangerouslySetInnerHTML={{ __html: `
+
+            <style dangerouslySetInnerHTML={{
+                __html: `
                 body { font-family: 'Montserrat', sans-serif; background-color: #f3f4f6; }
                 .input-field { background: #FFFFFF; border-radius: 8px; padding: 12px; width: 100%; color: #000; outline: none; }
                 .label-text { display: block; color: #FFFFFF; font-size: 10px; font-weight: 700; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.05em; }
@@ -70,7 +71,7 @@ const Register = () => {
                     </div>
 
                     <form onSubmit={handleSubmit} className="w-full space-y-8 pb-20">
-                        
+
                         {/* Student Info */}
                         <div className="rounded-xl p-8 shadow-2xl" style={{ backgroundColor: colors.cardBlue }}>
                             <h3 className="text-white text-xl font-bold mb-6 border-b border-blue-400 pb-2">Student Information</h3>
@@ -87,6 +88,17 @@ const Register = () => {
                                         <option value="female">Female</option>
                                     </select>
                                 </div>
+                            </div>
+                        </div>
+
+                        {/* Educational Background */}
+                        <div className="rounded-xl p-8 shadow-2xl" style={{ backgroundColor: colors.cardBlue }}>
+                            <h3 className="text-white text-xl font-bold mb-6 border-b border-blue-400 pb-2">User Educational Background</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div><label className="label-text">Previous School Attended</label><input name="prev_school" className="input-field" onChange={handleChange} /></div>
+                                <div><label className="label-text">Address of Previous School</label><input name="school_address" className="input-field" onChange={handleChange} /></div>
+                                <div><label className="label-text">Previous Grade Level</label><input name="prev_grade" className="input-field" onChange={handleChange} /></div>
+                                <div><label className="label-text">Previous School Year Attended</label><input name="school_year" className="input-field" onChange={handleChange} /></div>
                             </div>
                         </div>
 
@@ -108,17 +120,6 @@ const Register = () => {
                                 <div><label className="label-text">Last Name</label><input name="guardian_last_name" className="input-field" onChange={handleChange} /></div>
                                 <div><label className="label-text">Date of Birth</label><input name="guardian_birth_date" type="date" className="input-field" onChange={handleChange} /></div>
                                 <div className="md:col-span-2"><label className="label-text">Occupation</label><input name="guardian_occupation" className="input-field" onChange={handleChange} /></div>
-                            </div>
-                        </div>
-
-                        {/* Educational Background */}
-                        <div className="rounded-xl p-8 shadow-2xl" style={{ backgroundColor: colors.cardBlue }}>
-                            <h3 className="text-white text-xl font-bold mb-6 border-b border-blue-400 pb-2">User Educational Background</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div><label className="label-text">Previous School Attended</label><input name="prev_school" className="input-field" onChange={handleChange} /></div>
-                                <div><label className="label-text">Address of Previous School</label><input name="school_address" className="input-field" onChange={handleChange} /></div>
-                                <div><label className="label-text">Previous Grade Level</label><input name="prev_grade" className="input-field" onChange={handleChange} /></div>
-                                <div><label className="label-text">Previous School Year Attended</label><input name="school_year" className="input-field" onChange={handleChange} /></div>
                             </div>
                         </div>
 
